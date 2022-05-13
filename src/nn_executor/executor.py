@@ -1,6 +1,9 @@
-from typing import List, Tuple
+from typing import Any, Dict, List, Tuple
+from sympy import degree
 import torch
 from torch import nn
+from nn_executor import models
+
 
 def layer_from_config(config):
     return
@@ -24,11 +27,13 @@ def get_from_idx(x, idx:int):
 class Node:
     
     def __init__(self, 
-                 layer:nn.Module) -> None:
+                 layer:nn.Module,
+                 degree:Tuple[int,int]=(1,1)) -> None:
         self.layer = layer
-        self.outputs:List[Tuple[int, int,'Node']] = []
-        self.inputs_values = []
+        self.outputs:List[Tuple[int, int,'Node']] = [] # [(dst_input_idx, src_output_idx, dst_node)]
+        self.degree = degree
         self.ready_inputs_cntr = 0
+        self.inputs_values =  [None for i in range(degree[0])]
     
     def set_input(self, idx:int, x:torch.Tensor) -> 'Node':
         if idx >= len(self.inputs_values):
@@ -47,13 +52,14 @@ class Node:
     def is_active(self):
         return self.ready_inputs_cntr == len(self.inputs_values)
     
-    def add_src(self, src_output_idx:int, src:'Node'):
-        src_idx = len(self.inputs_values)
+    def add_src(self, src_output_idx:int, src:'Node',dst_input_idx:int):
+        # resize input buffer to hold all inputs
+        if dst_input_idx >= len(self.inputs_values):
+            raise RuntimeError(f"dst_input_idx = {dst_input_idx} is out of range for input of size {self.degree[0]}")
+        
         # add this node to it's src 
-        src.outputs.append((src_idx,src_output_idx,self))
-        # add empty place
-        self.inputs_values.append(None)
-    
+        src.outputs.append((dst_input_idx,src_output_idx,self))
+        
     def __call__(self) -> List['Node']:
         # basic layer forward
         output = self.layer(*self.inputs_values)
@@ -62,11 +68,11 @@ class Node:
         self.inputs_values = [None for i in self.inputs_values]
         
         activated = []
-        for src_idx, output_idx, dst_node in self.outputs:
+        for dst_input_idx, src_output_idx, dst_node in self.outputs:
             # choose one of results
-            result_to_dst = get_from_idx(output,output_idx)
+            result_to_dst = get_from_idx(output,src_output_idx)
             # propagate to dst node
-            active_node = dst_node.set_input(src_idx, result_to_dst)
+            active_node = dst_node.set_input(dst_input_idx, result_to_dst)
             # if node is activated
             if active_node is not None:
                 # add to list
@@ -78,16 +84,18 @@ class Node:
 
 class InputNode(Node):
     def __init__(self, layer: nn.Module, num_of_inputs:int=1) -> None:
-        super().__init__(layer)
+        super().__init__(layer,(num_of_inputs,num_of_inputs))
         self.inputs_values = [None for i in range(num_of_inputs)]
 
 
 class OutputNode(Node):
-    def __init__(self, layer: nn.Module) -> None:
-        super().__init__(layer)
+    def __init__(self, 
+                 layer: nn.Module,
+                 num_of_outputs:int=1) -> None:
+        super().__init__(layer,(num_of_outputs,num_of_outputs))
     
     def set_input(self, idx: int, x) -> 'Node':
-        is_activate =  super().set_input(idx, x)
+        is_active =  super().set_input(idx, x)
         # always return None -- prevent execution as basic node
         return None
     
@@ -103,41 +111,51 @@ class OutputNode(Node):
 class Executor(nn.Module):
     
     def __init__(self, 
-                 layers_indeces:List[int],
-                 layers_map:List[nn.Module],
-                 connections:List[Tuple[int,int,int,int]],
-                 outputs:List[Tuple[int,int]]) -> None:
+                 model_description:Dict[str,Any],
+                 ) -> None:
         super().__init__()
+        layers_indices:List[int] = model_description['layers_indices'].copy()
+        layers_in_out_channels:List[Tuple[List[int],List[int]]] = model_description['layers_in_out_channels'].copy()
+        unique_layers:List[nn.Module] = model_description['unique_layers'].copy()
+        connections:List[Tuple[int,int,int,int]] = model_description['connections'].copy()
+        outputs:List[Tuple[int,int,int]] = model_description['outputs'].copy()
         
-        self.layers_indeces:List[int] = layers_indeces.copy()
-        self.layers_map:List[nn.Module] = layers_map.copy()
-        self.connections:List[Tuple[int,int,int,int]] = connections.copy()
-        self.outputs:List[Tuple[int,int]] = outputs.copy()
+        # get num of inputs and outputs of nodes
+        layers_degree = [(len(in_out_ch[0]),len(in_out_ch[1])) for in_out_ch in layers_in_out_channels]
+
+        self.model_description = model_description.copy()
         
-        connections = connections.copy() # this list is modified by some of the following functions
-        self.update_connections(layers_indeces=layers_indeces, 
-                                layers_map=layers_map, 
+        # connections list is modified by some of the following functions
+        self.update_connections(layers_indices=layers_indices, 
+                                layers_degree=layers_degree, 
+                                unique_layers=unique_layers, 
                                 connections=connections, 
                                 outputs=outputs)
-        self.nodes:List[Node] = self.create_nodes(layers_indeces=layers_indeces, 
-                                                  layers_map=layers_map,
-                                                  connections=connections)
-        self.register_layers(layers_map=layers_map)
+        self.nodes:List[Node] = self.create_nodes(layers_indices=layers_indices,
+                                                  layers_degree=layers_degree, 
+                                                  unique_layers=unique_layers,
+                                                  connections=connections,
+                                                  outputs=outputs)
+        self.register_layers(unique_layers=unique_layers)
         self.connect(connections=connections)
-        
+    
+    def get_state(self):
+        return self.model_description.copy()
+    
     def register_layers(self,
-                        layers_map:List[nn.Module]):
-        for i, L in enumerate(layers_map):
+                        unique_layers:List[nn.Module]):
+        for i, L in enumerate(unique_layers):
             cls = L.__class__.__name__
             self.add_module("layer_{:03}_type_{}".format(i,cls),L)
     
     def update_connections(self, 
-                           layers_indeces:List[int], 
-                           layers_map:List[nn.Module], 
+                           layers_indices:List[int], 
+                           layers_degree:List[Tuple[int,int]],
+                           unique_layers:List[nn.Module], 
                            connections:List[Tuple[int,int,int,int]], 
-                           outputs:List[Tuple[int,int]]):
-        dst = len(layers_indeces)+1
-        for dst_in_idx, (src, src_out_idx) in enumerate(outputs):
+                           outputs:List[Tuple[int,int,int]]):
+        dst = len(layers_indices)+1
+        for src, src_out_idx, dst_in_idx in outputs:
             link = (src, src_out_idx, dst, dst_in_idx)
             connections.append(link)
     
@@ -151,21 +169,26 @@ class Executor(nn.Module):
         return noi+1
     
     def create_nodes(self, 
-                     layers_indeces:List[int], 
-                     layers_map:List[nn.Module], 
-                     connections:List[Tuple[int,int,int,int]]):
+                     layers_indices:List[int], 
+                     layers_degree:List[Tuple[int,int]], 
+                     unique_layers:List[nn.Module], 
+                     connections:List[Tuple[int,int,int,int]],
+                     outputs:List[Tuple[int,int,int]],
+                     ):
         noi = self.get_number_of_inputs(connections)
+        noo = len(outputs)
         
         nodes =  []
-        for layer_idx in layers_indeces:
-            L = layers_map[layer_idx]
-            nodes.append(Node(L))
+        for layer_idx, degree in zip(layers_indices,layers_degree):
+            L = unique_layers[layer_idx]
+            nodes.append(Node(L,degree=degree))
         
-        inL, outL = Identity(),Identity()
+        inL, outL = models.Identity(),models.Identity()
         
         nodes = [InputNode(inL,noi),
                  *nodes,
-                 OutputNode(outL)]
+                 OutputNode(outL,noo)]
+        
         return nodes
     
     def connect(self, 
@@ -174,7 +197,7 @@ class Executor(nn.Module):
             src, src_out_idx, dst, dst_in_idx = link
             dst_node:Node = self.nodes[dst]
             src_node:Node = self.nodes[src]
-            dst_node.add_src(src_out_idx,src_node)
+            dst_node.add_src(src_out_idx,src_node,dst_in_idx)
     
     def forward(self, *args):
         for i,x in enumerate(args):
@@ -193,89 +216,3 @@ class Executor(nn.Module):
         outputs = self.nodes[-1]()
         
         return outputs
-    
-    def save(self,path):
-        for ch in self.children():
-            print(ch)
-
-
-if __name__ == '__main__':
-    from nn_executor.models import Add, Sub, Identity
-    from nn_executor import parser
-
-    # from brevitas import nn as qnn
-    layers_map = [
-        nn.Conv2d(3,5,3,padding=(1,1)),
-        nn.MaxPool2d(2,2),
-        # res
-        nn.Conv2d(5,5,3,padding=(1,1)),
-        # nn.Conv2d(5,5,3,padding=(1,1)),
-        nn.ReLU(),
-        # brach 2
-        nn.Conv2d(4,5,3,padding=(1,1)),
-        nn.MaxPool2d(2,2),
-        Add(3),
-        nn.Conv2d(5,10,3,padding=(1,1)),
-        nn.Conv2d(10,7,3,padding=(1,1)),
-        nn.MaxPool2d(2,2),
-        nn.Conv2d(7,10,3,padding=(1,1)),
-        # nn.ReLU(),#r
-        nn.Conv2d(10,10,3,padding=(1,1),groups=10),
-        # nn.ReLU(),#r
-        nn.Conv2d(10,10,3,padding=(1,1)),
-        # nn.ReLU(),#r
-        Sub(3),
-        nn.Conv2d(10,3,3,padding=(1,1)),
-    ] 
-    # layers_indeces = [ i for i in range(len(layers_map))]
-    # layers_indeces=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17]
-    layers_indeces = [0,1,2,2,3,4,5,6,7,8,9,10,3,11,3,12,3,13,14]
-    connections = [
-    (0,0,1,0),
-    (1,0,2,0),#r
-    (2,0,3,0),
-    (3,0,4,0),
-    (4,0,5,0),
-    #b2    
-    (0,1,6,0),
-    (6,0,7,0),
-    #res
-    (2,0,8,0),
-    (5,0,8,1),
-    (7,0,8,2),#add
-    
-    (8,0,9,0),
-    (9,0,10,0),
-    (10,0,11,0),
-    (11,0,12,0),
-    (12,0,13,0),#r
-    (13,0,14,0),
-    (14,0,15,0),#r
-    (15,0,16,0),
-    (16,0,17,0),#r
-    # sub
-    (13,0,18,0),
-    (15,0,18,1),
-    # (17,0,18),
-    
-    (18,0,19,0),
-    ]
-    outputs = [
-        (8,0),
-        (19,0),
-        (0,0),
-        # (0,1)
-    ]
-    h = parser.Parser()
-    
-    exec = Executor(layers_indeces, 
-                    layers_map, 
-                    connections,
-                    outputs).eval()
-    
-    t0 = torch.rand(1,3,64,64)
-    t1 = torch.rand(1,4,64,64)
-    
-    h.parse_module(exec,t0,t1)
-    
-    print(h)
