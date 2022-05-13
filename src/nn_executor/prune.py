@@ -103,7 +103,16 @@ class BidirectionalNode:
         
         self.on_forward_done = lambda x: None
         self.on_backward_done = lambda x: None
+    
+    def get_description(self,)->Dict[str:Any]:
+        sd = {}
+        sd['input_channels'] = self.inputs_channels
+        sd['output_channels'] = self.outputs_channels
+        sd['node_idx'] = self.node_idx
+        sd['module'] = self.module
         
+        return
+    
     def apply_connections(self,
                           inputs_channels:List[int],
                           outputs_channels:List[int],
@@ -111,7 +120,7 @@ class BidirectionalNode:
                           ):
         self.forward_buffers = [None for ch_in in inputs_channels]
         self.backward_buffers = [[] for ch_out in outputs_channels]
-        self.modifier_memory = [[] for ch_out in outputs_channels]
+        self.modifier_memory = [None for ch_out in outputs_channels]
         self.forward_buffers_ready_mask = [False for ch_in in inputs_channels]
         self.backward_buffers_ready_mask = [[] for ch_out in outputs_channels]
         self.dst_nodes = [[] for ch_out in outputs_channels]
@@ -141,26 +150,23 @@ class BidirectionalNode:
     
     @property
     def forward_ready(self):
-        # check only for available inputs
-        forward_buffers = from_mask(self.forward_buffers_ready_mask,
-                                    self.inputs_availability)
-        
-        is_ready = sum(forward_buffers) == len(forward_buffers)
+        # sum inputs with ready flag and check if all are True
+        is_ready = sum(self.forward_buffers_ready_mask) == len(self.forward_buffers_ready_mask)
         return is_ready
         
     @property
     def backward_ready(self):
-        # check only for available outputs
-        backward_buffers = from_mask(self.backward_buffers_ready_mask,
-                                     self.outputs_availability)
-        
+        # sum outputs (and dst)  with ready flag and check if all are True
+        backward_buffers = self.backward_buffers_ready_mask
         out_ready = [sum(out) == len(out) for out in backward_buffers]
         is_ready = sum(out_ready) == len(out_ready)
         return is_ready
         
-    def set_from_forward(self, mask, dst_in_idx):
-        if dst_in_idx < len(self.forward_buffers):
-            self.forward_buffers[dst_in_idx] = mask
+    def set_from_forward(self, 
+                         mask_mul_bias:modifiers.FORWARD_TYPE, 
+                         dst_in_idx:int):
+        if 0 <= dst_in_idx < len(self.forward_buffers):
+            self.forward_buffers[dst_in_idx] = mask_mul_bias
             self.forward_buffers_ready_mask[dst_in_idx] = True
         else:
             raise RuntimeError(f"{dst_in_idx} out of range for inputs size {len(self.forward_buffers)} in from_forward")
@@ -168,17 +174,25 @@ class BidirectionalNode:
         if self.forward_ready and self.on_forward_available:
             self.on_forward_available(self.node_idx)
         
-    def set_from_backward(self, mask_mul, src_out_idx, # src and dst are for forward pass
-                      dst_node_idx, dst_node_in_idx): # so src is this node
+    def set_from_backward(self, 
+                          mask_mul:modifiers.BACKWARD_TYPE, 
+                          src_out_idx:int, # src and dst are for forward notation
+                          dst_node_idx:int, 
+                          dst_node_in_idx:int): # so src is this node
         
-        if src_out_idx < len(self.backward_buffers):
+        if 0 <= src_out_idx < len(self.backward_buffers):
+            # get buffers for src_out_idx-output of this node
             outs = self.backward_buffers[src_out_idx]
             outs_read_mask = self.backward_buffers_ready_mask[src_out_idx]
             dst_nodes = self.dst_nodes[src_out_idx]
             
+            # try to find position in list for given dst connection
             found = False
             for i,(node_idx,port_idx) in enumerate(dst_nodes):
-                if node_idx == dst_node_idx and port_idx == dst_node_in_idx:
+                # if node is found
+                if node_idx == dst_node_idx \
+                        and port_idx == dst_node_in_idx:
+                    # assign mask mul and set flags
                     outs[i] = mask_mul
                     outs_read_mask[i] = True
                     found = True
@@ -190,9 +204,17 @@ class BidirectionalNode:
         else:
             raise RuntimeError(f"{src_out_idx} out of range for outputs size {len(self.backward_buffers)}")
         
+        # when buffers are completed
         if self.backward_ready and self.on_backward_available:
             self.on_backward_available(self.node_idx)
     
+    def __clear_buffers(self):
+        self.forward_buffers = [None for fb in self.forward_buffers]
+        self.backward_buffers = [[None for dst_b in bb] for bb in self.backward_buffers]
+        self.modifier_memory = [None for ch_out in self.modifier_memory]
+        self.forward_buffers_ready_mask = [False for fbrm in self.forward_buffers_ready_mask]
+        self.backward_buffers_ready_mask = [[False for dst_r in bbrm] for bbrm in self.backward_buffers_ready_mask]
+        
     @property
     def num_of_input(self):
         return sum(self.inputs_availability)
@@ -200,32 +222,6 @@ class BidirectionalNode:
     @property
     def num_of_output(self):
         return sum(self.outputs_availability)
-    
-    def from_mask(self, L, interface='in'):
-        return from_mask(L,self.inputs_availability if interface == 'in' else self.outputs_availability)
-    
-    def from_out_dst_masks(self, L):
-        masked_L = self.from_mask(L,'out')
-        masked_dst_masks = self.from_mask(self.outputs_dst_availability,'out')
-        
-        return [from_mask(oL,o_dst) for oL,o_dst in zip(masked_L,masked_dst_masks)]
-    
-    def to_out_dst_masks(self,L,replace=None):
-        new_L = []
-        remasked_L = self.to_mask(L,None,'out')
-        
-        for idx, sub_L in enumerate(remasked_L):
-            if sub_L:
-                new_sub_L = to_mask(sub_L,self.outputs_dst_availability[idx],replace=replace)
-            else:
-                new_sub_L = [replace for e in self.outputs_dst_availability[idx]]
-            
-            new_L.append(new_sub_L)
-            
-        return new_L
-        
-    def to_mask(self, L, replace=None, interface='in'):
-        return to_mask(L,self.inputs_availability if interface == 'in' else self.outputs_availability, replace=replace)
     
     def reset_forward_buffers_ready_mask(self):
         for idx in range(len(self.forward_buffers_ready_mask)):
@@ -237,95 +233,86 @@ class BidirectionalNode:
                 buff[idx] = False
     
     def forward(self, 
-                mods:Dict[str,modifiers.Modifier]):
-        
-        in_masks = self.from_mask(self.forward_buffers,'in')
-        
+                mods:Dict[str,modifiers.Modifier]
+                ):
         # empty node -> zeroed output masks
         if self.module is None:
             new_module = None
-            out_masks = [torch.zeros(ch,dtype=torch.bool) \
-                         for ch in self.from_mask(self.outputs_channels,'out')]
+            out_mask_mul_bias = [(torch.zeros(ch,dtype=torch.bool), None, None) \
+                                                    for ch in self.outputs_channels]
         else:
+            # get class name
             cls = self.module.__class__.__name__
             if cls not in mods:
-                raise RuntimeError(f"{cls} has not delivered appropriate modifier in node:{self.node_idx}")
+                raise RuntimeError(f"{cls} has not delivered appropriate modifier for node:{self.node_idx}")
             # make forward
-            new_module, out_masks= mods[cls].forward(self.module,in_masks)
+            new_module, out_mask_mul_bias = mods[cls].forward(self.module,
+                                                              self.forward_buffers,
+                                                              self.modifier_memory)
         
-        available_inputs = [mask.sum().item() > 0 for mask in in_masks]
-        available_outputs = [mask.sum().item() > 0 for mask in out_masks]
-        # if node is deleted
-        if new_module is None:
-            # needed backward for previous nodes -- if this node is the only one dst 
-            for in_idx, available in enumerate(self.to_mask(available_inputs,False,'in')):
-                # only if input has been available
-                if available:
-                    # call 
-                    src,src_out = self.src_nodes[in_idx]
-                    dst,dst_in = self.node_idx, in_idx
-                    mask = torch.zeros(self.inputs_channels[in_idx],dtype=torch.bool)
-                    mul = torch.ones_like(mask,dtype=torch.float32)
-                    # propagate
-                    self.on_propagate_backward((mask,mul),src,src_out,dst,dst_in)
+        outputs_availabilities = []
+        outputs_dst_availabilities = []
+        new_output_channels = []
+        # forward propagation
+        for out_idx, ((MASK,MUL,BIAS),
+                      OUTPUT_MASK_MULS) in enumerate(zip(out_mask_mul_bias,
+                                                         self.backward_buffers)):
+            new_output_channels.append(MASK.sum().item())
+            # connection src
+            src_idx, src_out_idx = self.node_idx, out_idx
+            # availability for this node
+            outputs_availabilities.append(MASK.sum().item() > 0)
+            # init availability for each dst
+            outputs_dst_availabilities.append([False for N in self.dst_nodes[out_idx]])
+            # iterate over all destinies
+            for i,((backwared_mask,_),
+                   (dst_idx,dst_in_idx)) in enumerate(zip(OUTPUT_MASK_MULS, 
+                                                          self.dst_nodes[out_idx])):
+                # mask both masks
+                mask = torch.logical_and(backwared_mask,MASK)
+                # num of channe;s
+                ch = mask.sum().item()
+                # determinate availability
+                outputs_dst_availabilities[out_idx][i]= ch > 0
+                # forward
+                self.on_propagate_forward((mask,MUL,BIAS),
+                                          src_idx,src_out_idx,
+                                          dst_idx,dst_in_idx)
+        new_input_channels = [m[0].sum().item() for m in self.forward_buffers]
+        inputs_availabilities = [ch > 0 for ch in new_input_channels]
         
-        out_masks = self.to_mask(out_masks,torch.tensor([],dtype=torch.bool),'out')
-        # forwarding output mask to next nodes
-        for out_idx, available in enumerate(self.outputs_availability):
-            # only for non preremoved outputs
-            if available:
-                # this node and current out as connection source
-                src,src_out = self.node_idx, out_idx
-                # list of destiny connections
-                dst_connections = self.dst_nodes[out_idx]
-                
-                # for each destination is needed propagation
-                for (dst, dst_in), dst_available in zip(dst_connections, self.outputs_dst_availability[out_idx]):
-                    if dst_available:
-                        mask = out_masks[out_idx]
-                        # propagate
-                        self.on_propagate_forward(mask,src,src_out,dst,dst_in)
-        
+        # prevention of again running forward
         self.reset_forward_buffers_ready_mask()
-        
-        # update availabilities
-        self.inputs_availability = self.to_mask(available_inputs,False,'in')
-        self.outputs_availability = self.to_mask(available_outputs,False,'out')
-        # zeroing outputs to dst nodes if given output is available 
-        outputs_dst_availability = []
-        for (out_a,dst_a) in zip(self.outputs_availability, self.outputs_dst_availability):
-            if out_a:
-                outputs_dst_availability.append(dst_a)
-            else:
-                outputs_dst_availability.append([False for out_dst in dst_a])
-        self.outputs_dst_availability = outputs_dst_availability
-        
         # update module
         self.module = new_module
         # update num of channels
-        new_input_channel = [mask.sum().item() for mask in self.to_mask(in_masks,torch.tensor([],dtype=torch.bool),'in')]
-        new_output_channel = [mask.sum().item() for mask in out_masks]
-        self.inputs_channels = new_input_channel
-        self.outputs_channels = new_output_channel
+        self.inputs_channels = new_input_channels
+        self.outputs_channels = new_output_channels
+        # update availabilities
+        self.inputs_availability = inputs_availabilities
+        self.outputs_availability = outputs_availabilities
+        self.outputs_dst_availability = outputs_dst_availabilities
+    
+        # raise event of done
+        if self.on_forward_done is not None:
+            self.on_forward_done(self.node_idx)  
         
-        self.on_forward_done(self.node_idx)  
-        return
+        self.__clear_buffers()
         
     def backward(self, 
-                mods:Dict[str,modifiers.Modifier]):
-        
-        raw_out_mask_muls = self.from_out_dst_masks(self.backward_buffers)
-        out_mask_muls = []
-        
+                mods:Dict[str,modifiers.Modifier]
+                ):
+        out_mask_muls:List[modifiers.BACKWARD_TYPE] = []        
         # merge all backwarded masks and muls into single pairs for each node output
-        for out_idx, single_out_mask_muls in enumerate(raw_out_mask_muls):
+        for out_idx, single_out_mask_muls in enumerate(self.backward_buffers):
+            # if there is sth backwarded
             if len(single_out_mask_muls):
                 masks = [m for (m,mul) in single_out_mask_muls]
                 muls = [mul for (m,mul) in single_out_mask_muls]
                 mask = torch.logical_or(masks[0],*masks)
                 mul = torch.mul(torch.ones_like(muls[0]),*muls)
                 out_mask_muls.append((mask,mul))
-                
+            
             else:
                 RuntimeError(f"Empty backwarded mask and multipliers for node:{self.node_idx} out:{out_idx}")
         
@@ -334,99 +321,37 @@ class BidirectionalNode:
             new_module = None
             in_mask_muls = [(torch.zeros(ch,dtype=torch.bool),torch.ones(ch,dtype=torch.bool)) \
                                    for ch in self.from_mask(self.inputs_channels,'in')]
-            
+            out_mask_muls = [(torch.zeros(ch,dtype=torch.bool), None) \
+                                   for ch in self.from_mask(self.outputs_channels,'in')]
         else:
+            # get class name
             cls = self.module.__class__.__name__
             if cls not in mods:
                 raise RuntimeError(f"{cls} has not delivered appropriate modifier!")
             # make backward
-            new_module, in_mask_muls= mods[cls].backward(self.module,out_mask_muls)
-        
-        available_inputs = [mask.sum().item() > 0 for mask, mul in in_mask_muls]
-        available_outputs = [mask.sum().item() > 0 for mask, mul in out_mask_muls]
-        
-        # if node is deleted
-        if new_module is None:
-            # forwarding output mask to next nodes
-            for out_idx, available in enumerate(self.to_mask(available_outputs,False,'out')):
-                # only for non preremoved outputs
-                if available:
-                    # this node and current out as connection source
-                    src,src_out = self.node_idx, out_idx
-                    # list of destiny connections
-                    dst_connections = self.dst_nodes[out_idx]
-                    
-                    single_out_mask_muls = to_mask(raw_out_mask_muls,self.outputs_dst_availability[out_idx],None)
-                    
-                    # for each destination is needed propagation
-                    for (dst, dst_in), dst_available, mask_mul in zip(dst_connections, 
-                                                                      self.outputs_dst_availability[out_idx],
-                                                                      single_out_mask_muls):
-                        # only for available dst 
-                        if dst_available:
-                            mask, mul = mask_mul
-                            # propagate only when mask was non zeroed fully
-                            if mask_mul[0].sum().item() > 0:
-                                self.on_propagate_forward(mask,src,src_out,dst,dst_in)
+            new_module, in_mask_muls, out_mask_muls = mods[cls].backward(self.module,out_mask_muls)
         
         # backward for previous nodes 
-        remasked_in_mask_muls = self.to_mask(in_mask_muls,(torch.tensor([],dtype=torch.bool),None),'in')
-        for in_idx, (available, mask_mul) in enumerate(zip(self.inputs_availability,
-                                                            remasked_in_mask_muls)):
-            # only for available inputs
-            if available:
-                # call 
-                src,src_out = self.src_nodes[in_idx]
-                dst,dst_in = self.node_idx, in_idx
-                # propagate
-                self.on_propagate_backward(mask_mul,src,src_out,dst,dst_in)
-    
-        self.reset_backward_buffers_ready_mask()
+        for in_idx, in_mask_mul in enumerate(in_mask_muls):
+            # call 
+            src, src_out = self.src_nodes[in_idx]
+            dst, dst_in = self.node_idx, in_idx
+            # propagate
+            self.on_propagate_backward(in_mask_mul,src,src_out,dst,dst_in)
         
-        # update availabilities
-        self.inputs_availability = self.to_mask(available_inputs,False,'in')
-        self.outputs_availability = self.to_mask(available_outputs,False,'out')
-        # zeroing outputs to dst nodes if given output is available 
-        outputs_dst_availability = []
-        for (out_a,dst_avs,dst_mask_muls) in zip(self.outputs_availability, 
-                                                 self.outputs_dst_availability,
-                                                 self.to_mask(raw_out_mask_muls,[],'out')
-                                                 ):
-            # deactivate all output dst
-            if not out_a:
-                outputs_dst_availability.append([False for out_dst in dst_a])
-            else:
-                new_dst_av = []
-                for dst_a, mask_mul in zip(dst_avs, # current availability mask
-                                           to_mask(dst_mask_muls, # backwarded mask_muls from dst
-                                                   dst_avs, # masked
-                                                   None)): 
-                    if not dst_a:
-                        new_dst_av.append(False)
-                    else:
-                        # dst is available, if mask is non empty
-                        non_empty = mask_mul[0].sum().item() > 0
-                        new_dst_av.append(non_empty)
-                
-                # new availability mask for output 
-                outputs_dst_availability.append(new_dst_av)
-                
-        self.outputs_dst_availability = outputs_dst_availability
+        # store modifier output
+        self.modifier_memory = out_mask_muls
+        # reset output buffers ready masks
+        self.reset_backward_buffers_ready_mask()
         # update module
         self.module = new_module
-        # update num of channels
-        new_input_channel = [mask.sum().item() for mask,mul in remasked_in_mask_muls]
-        new_output_channel = [mask.sum().item() for mask,mul in out_mask_muls]
-        self.inputs_channels = new_input_channel
-        self.outputs_channels = new_output_channel
-        
-        self.on_backward_done(self.node_idx)
-        
-        # if node has no inputs -> forward
-        if len(self.inputs_channels) == 0:
-            self.forward(mods)
-            
-        return
+        # raise event of done
+        if self.on_backward_done:
+            self.on_backward_done(self.node_idx)
+        # if node has no inputs -> activate forward
+        if len(self.inputs_channels) == 0 and self.on_forward_available:
+            # raise event for forward execution
+            self.on_forward_available(self.node_idx)
 
 
 class Callable:
@@ -515,9 +440,6 @@ class Scissors:
             node.on_propagate_backward = backward_propagation_put
             node.on_propagate_forward = forward_propagation_put
         
-        # turn backward pass into forward in input node
-        self.nodes[0].on_backward_done = forward_put
-        
         cntr = 0
         while not forward_queue.empty()\
                 or not backward_queue.empty()\
@@ -534,11 +456,11 @@ class Scissors:
                 
             # propagate forward
             while not forward_propagation_queue.empty():
-                mask,\
+                mask_mul_bias,\
                 src_node_idx,src_out_idx,\
                 dst_node_idx,dst_in_idx = forward_propagation_queue.get_nowait()
                 # set mask_mul in src node backward buffers
-                self.nodes[dst_node_idx].set_from_forward(mask,dst_in_idx)
+                self.nodes[dst_node_idx].set_from_forward(mask_mul_bias,dst_in_idx)
                 
             # backward nodes modification
             while not backward_queue.empty():

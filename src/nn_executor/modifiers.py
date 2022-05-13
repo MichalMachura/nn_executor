@@ -121,7 +121,7 @@ class Conv2dModifier(Modifier):
                     if in_mul is not None:
                         W = W * in_mul.reshape(1,-1,1,1)
                     # apply masks
-                    W = W[out_mask, in_mask,:,:]
+                    W = W[out_mask, :,:,:][:,in_mask,:,:]
                     m.weight[:] = W
                     
                     if BIAS is not None:
@@ -177,14 +177,13 @@ class BatchNorm2dModifier(Modifier):
                            in_module.affine,
                            in_module.track_running_stats
                            )
-        
         with torch.no_grad():
             m.weight[:] = in_module.weight[:]
             m.bias[:] = in_module.bias[:]
             m.running_mean[:] = in_module.running_mean[:]
             m.running_var[:] = in_module.running_var[:]
-            m.num_batches_tracked[:] = in_module.num_batches_tracked[:]
-        
+            m.num_batches_tracked *= 0
+            m.num_batches_tracked += in_module.num_batches_tracked
         return m
         
     def forward(self,
@@ -223,7 +222,7 @@ class BatchNorm2dModifier(Modifier):
                 
                 with torch.no_grad():
                     mul = 1
-                    if in_mul is None:
+                    if in_mul is not None:
                         mul = in_mul
                     
                     m.weight[:] = (in_module.weight*mul)[in_mask]
