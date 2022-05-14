@@ -1,7 +1,7 @@
 from typing import List, Tuple, Union
 import torch
 import torch.nn as nn
-from nn_executor import models
+from nn_executor import models, utils
 
 
 FORWARD_TYPE = Tuple[torch.Tensor, # mask
@@ -605,21 +605,21 @@ class AddModifier(ElementwiseModifier):
             return None, [(out_mask,None,BIAS),]
         
         else:
-            mask = torch.logical_and(masks[0],*masks)
-            mask_or = torch.logical_or(masks[0],*masks)
+            mask = utils.between_all(torch.logical_and,masks)
+            mask_or = utils.between_all(torch.logical_or,masks)
             ch = mask.sum().item()
             
             if torch.logical_xor(mask,mask_or).sum().item() > 0:
                 raise RuntimeError("Input masks are different")
             
-            if ch != out_mask:
+            if ch != ch_out:
                 Warning(f"Inputs masks channels:{ch} is different from output mask:{ch_out}.")
             
-            if ch < out_mask:
+            if ch < ch_out:
                 Warning(f"Outputs masks channels:{ch_out} is reduced to:{ch} channels.")
             
             # adder with input for bias
-            m = models.Add(len(mask)+int(BIAS is not None))
+            m = models.Add(len(masks)+int(BIAS is not None))
             
             if BIAS is not None:
                 b = models.Variable(BIAS.reshape(1,-1,1,1))
@@ -675,9 +675,8 @@ class MulModifier(ElementwiseModifier):
             if in_mul is not None:
                 muls.append(in_mul)
             
-        MUL = torch.mul(torch.ones_like(muls[0]),
-                                        *muls) if len(muls) > 0 else None
-        MASK = torch.logical_and(masks[0],*masks) # there is min one element -- out_mask
+        MUL = utils.between_all(torch.mul,muls) if len(muls) > 0 else None
+        MASK = utils.between_all(torch.logical_and,masks) # there is min one element -- out_mask
         CH = MASK.sum().item()
         
         # only bias if available
@@ -773,7 +772,7 @@ class CatModifier(Modifier):
             
             if ch_in > 0:
                 # update shape of this input 
-                sh = list(*in_module.input_shapes[i])
+                sh = list(in_module.input_shapes[i])
                 sh[dim] = ch_in
                 valid_shapes.append(sh)
                 # input is const
@@ -782,7 +781,7 @@ class CatModifier(Modifier):
                 # next available pos
                 pos_available += 1
 
-        MASK = torch.cat(out_masks,dim=dim)
+        MASK = torch.cat(out_masks,dim=0)
         MUL = torch.cat(muls,dim=0)
         BIAS = torch.cat(biases,dim=0)
         
@@ -822,7 +821,7 @@ class CatModifier(Modifier):
                 b_sh = [1 for s in sh]
                 b_sh[1] = -1 # channel dim
                 # dims of bias map -- shape of origina map that is replace by bias
-                bias_map_sh = list(*sh)
+                bias_map_sh = list(sh)
                 bias_map_sh[dim] = 1
                 
                 b = torch.tile(bias.reshape(b_sh),dims=bias_map_sh)

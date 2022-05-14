@@ -47,7 +47,8 @@ SUPPORTED_MODULES = [
                     models.Sub,
                     models.Add,
                     models.Mul,
-                    models.Identity,
+                    # models.Identity, 
+                    # Modules like Identity should not be included or should clone input tensors to be describable
                     models.Pruner,
                     models.ResidualPruner,
                     ]
@@ -55,7 +56,11 @@ SUPPORTED_MODULES = [
 
 class Parser:
 
-    def __init__(self, supported_modules=SUPPORTED_MODULES) -> None:
+    def __init__(self, 
+                 supported_modules:List=SUPPORTED_MODULES 
+                 ) -> None:
+        """
+        """     
         self.supported_modules = supported_modules
         self.layers_indices:List[int] = [] # list of indices of layers -> one module can be used many times in network
         self.unique_layers:List[nn.Module] = [] # list of unique modules

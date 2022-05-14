@@ -4,6 +4,13 @@ from torch import nn
 import json
 
 
+
+def between_all(op, L:List):
+    result = L[0]
+    for element in L[1:]:
+        result = op(result,element)
+    return result
+
 # def save(filepaths:Union[str,Tuple[str,str]],
 #          layers_indices:List[int],
 #          layers_in_out_channels:List[Tuple[List[int],List[int]]],

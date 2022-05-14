@@ -32,6 +32,9 @@ class Constant(nn.Module):
         super().__init__()
         self.t = torch.nn.Parameter(t,requires_grad=False)
 
+    def __repr__(self,):
+        return f'Constant(t=torch.tensor({tuple(self.t.shape)},dtype={self.t.dtype}))'
+        
     def forward(self):
         return self.t
     
@@ -44,7 +47,10 @@ class Variable(nn.Module):
     def __init__(self, t:torch.Tensor) -> None:
         super().__init__()
         self.t = torch.nn.Parameter(t,requires_grad=True)
-
+    
+    def __repr__(self,):
+        return f'Variable(t=torch.tensor({tuple(self.t.shape)},dtype={self.t.dtype}))'
+        
     def forward(self):
         return self.t
 
@@ -93,8 +99,8 @@ class WithBatchNorm2d(nn.Module):
         self.module:nn.Module = module
         self.bn = nn.BatchNorm2d(ch)
         
-    def extra_repr(self) -> str:
-        s = f'module={self.module}, ch={self.bn.num_features}'
+    def __repr__(self) -> str:
+        s = f'WithBatchNorm2d(module={self.module}, ch={self.bn.num_features})'
         return s
     
     def forward(self, *args):
@@ -105,32 +111,35 @@ class WithBatchNorm2d(nn.Module):
 
 class MultiWithConst(nn.Module):
     def __init__(self, 
-                 module:nn.Module) -> None:
+                 module:nn.Module,
+                 modules:List[Tuple[torch.nn.Module,int]]=[]
+                 ) -> None:
         super().__init__()
         self.module:nn.Module = module
-        self.params = nn.ModuleList() # Constants or Variables modules
-        self.positions = nn.ParameterList()
+        self.params_pos:List[Tuple[torch.nn.Module,int]] = [] # Constants or Variables modules
+        for mp in modules:
+            self.add((mp))
         
-    def extra_repr(self) -> str:
-        s = f'module={self.module}, ch={self.bn.num_features}'
+    def __repr__(self):
+        L = [(m,p) for m,p in self.params_pos]
+        s = f'MultiWithConst(module={self.module}, modules={L})'
+        
         return s
-    
+        
     def add(self,
             pos:int,
             module:nn.Module,
             ):
         with torch.no_grad():
-            self.params.append(module)
-            self.positions.append(pos)
-    
+            self.params_pos.append((module,pos))
+            
     def forward(self, *args):
         args_iter = iter(args)
         joined_args = []
         
-        pos_param = list(zip(self.params,self.positions))
-        pos_param = sorted(pos_param,key=lambda x : x[0])
+        params_pos = sorted(self.params_pos,key=lambda x : x[1])
         
-        for pos, param in pos_param:
+        for param,pos in params_pos:
             # fill with input args
             while len(joined_args) != pos:
                 input_ = next(args_iter)

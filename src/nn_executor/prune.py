@@ -1,8 +1,9 @@
+from unittest import result
 from matplotlib import container
 import torch
 from torch import nn
 from typing import Any, Dict, List, Tuple, Type, Union
-from nn_executor import modifiers, models
+from nn_executor import modifiers, models, utils
 import queue
 
 
@@ -59,6 +60,7 @@ def to_mask(L:List[Any], mask:List[bool], replace=None)->List[Any]:
             new_L.append(replace)
     
     return new_L
+    
 
 CONNECTION = Tuple[int,int,int,int]
 CONNECTION_ANCHOR = Tuple[int,int] # Node idx, input/output idx 
@@ -75,7 +77,6 @@ class BidirectionalNode:
         self.node_idx:int = node_idx
         self.inputs_channels:List[int] = []
         self.outputs_channels:List[int] = []
-        self.connections:List[Tuple[int,int,int,int]] = []
         
         self.forward_buffers:List[modifiers.FORWARD_TYPE] = [] # mask of input tensors
         self.modifier_memory:List[modifiers.BACKWARD_TYPE] = [] # mask,mul for each output after processing by modifier
@@ -93,8 +94,6 @@ class BidirectionalNode:
         self.backward_buffers_ready_mask:List[List[bool]] = []
                                         # for outputs, for (dst_node,dst_node_in): is assigned? 
         
-        self.apply_connections(inputs_channels,outputs_channels,connections)
-        
         self.on_forward_available:Type[on_available] = on_available
         self.on_backward_available:Type[on_available] = on_available
         
@@ -103,15 +102,50 @@ class BidirectionalNode:
         
         self.on_forward_done = lambda x: None
         self.on_backward_done = lambda x: None
+        
+        self.apply_connections(inputs_channels,outputs_channels,connections)
     
-    def get_description(self,)->Dict[str:Any]:
+    @property
+    def description(self):
         sd = {}
-        sd['input_channels'] = self.inputs_channels
-        sd['output_channels'] = self.outputs_channels
+        sd['input_channels'] = self.inputs_channels.copy()
+        sd['input_mask'] = self.inputs_availability.copy()
+        sd['num_of_input'] = sum(self.inputs_availability)
+        
+        sd['output_channels'] = self.outputs_channels.copy()
+        sd['output_mask'] = self.outputs_availability.copy()
+        sd['num_of_output'] = sum(self.outputs_availability)
+        
         sd['node_idx'] = self.node_idx
         sd['module'] = self.module
         
-        return
+        sd['connections_as_src'] = []
+        sd['connections_as_dst'] = []
+        
+        if self.module is not None:
+            # as dst
+            for dst_in_idx,(src_idx, src_out_idx) in enumerate(self.src_nodes):
+                # if connection is not removed
+                if self.inputs_availability[dst_in_idx]:
+                    sd['connections_as_dst'].append((src_idx,src_out_idx,
+                                                     self.node_idx,dst_in_idx))
+        
+            # as src
+            for (src_out_idx, 
+                 (DSTs, 
+                  DSTs_availability)) in enumerate(zip(self.dst_nodes,
+                                                       self.outputs_dst_availability)):
+                # if this output is not removed
+                if self.outputs_availability[src_out_idx]:
+                    # for each dst
+                    for (available,
+                         (dst_idx,dst_in_idx)) in zip(DSTs_availability,
+                                                      DSTs):
+                        if available:
+                            sd['connections_as_src'].append((self.node_idx,src_out_idx,
+                                                             dst_idx,dst_in_idx))
+        
+        return sd
     
     def apply_connections(self,
                           inputs_channels:List[int],
@@ -128,7 +162,6 @@ class BidirectionalNode:
         
         self.inputs_channels = inputs_channels.copy()
         self.outputs_channels = outputs_channels.copy()
-        self.connections = []
         
         for src_node_idx, src_node_out_idx, \
             dst_node_idx, dst_node_in_idx in connections:
@@ -138,11 +171,9 @@ class BidirectionalNode:
                 self.backward_buffers[src_node_out_idx].append(None)
                 self.backward_buffers_ready_mask[src_node_out_idx].append(False)
                 
-                self.connections.append((src_node_idx,src_node_out_idx,dst_node_idx,dst_node_in_idx))
             # another node is input for this node
             elif dst_node_idx == self.node_idx:
                 self.src_nodes[dst_node_in_idx] = (src_node_idx, src_node_out_idx)
-                self.connections.append((src_node_idx,src_node_out_idx,dst_node_idx,dst_node_in_idx))
         
         self.inputs_availability = [True for i in range(len(self.inputs_channels))]
         self.outputs_availability = [True for i in range(len(self.outputs_channels))]
@@ -162,7 +193,7 @@ class BidirectionalNode:
         is_ready = sum(out_ready) == len(out_ready)
         return is_ready
         
-    def set_from_forward(self, 
+    def take_from_forward(self, 
                          mask_mul_bias:modifiers.FORWARD_TYPE, 
                          dst_in_idx:int):
         if 0 <= dst_in_idx < len(self.forward_buffers):
@@ -174,7 +205,7 @@ class BidirectionalNode:
         if self.forward_ready and self.on_forward_available:
             self.on_forward_available(self.node_idx)
         
-    def set_from_backward(self, 
+    def take_from_backward(self, 
                           mask_mul:modifiers.BACKWARD_TYPE, 
                           src_out_idx:int, # src and dst are for forward notation
                           dst_node_idx:int, 
@@ -235,6 +266,7 @@ class BidirectionalNode:
     def forward(self, 
                 mods:Dict[str,modifiers.Modifier]
                 ):
+        print("Node_idxf: ",self.node_idx)
         # empty node -> zeroed output masks
         if self.module is None:
             new_module = None
@@ -257,11 +289,11 @@ class BidirectionalNode:
         for out_idx, ((MASK,MUL,BIAS),
                       OUTPUT_MASK_MULS) in enumerate(zip(out_mask_mul_bias,
                                                          self.backward_buffers)):
-            new_output_channels.append(MASK.sum().item())
+            new_output_channels.append(MASK.sum().item() if BIAS is None else 0)
             # connection src
             src_idx, src_out_idx = self.node_idx, out_idx
             # availability for this node
-            outputs_availabilities.append(MASK.sum().item() > 0)
+            outputs_availabilities.append(MASK.sum().item() > 0 and BIAS is None)
             # init availability for each dst
             outputs_dst_availabilities.append([False for N in self.dst_nodes[out_idx]])
             # iterate over all destinies
@@ -273,12 +305,13 @@ class BidirectionalNode:
                 # num of channe;s
                 ch = mask.sum().item()
                 # determinate availability
-                outputs_dst_availabilities[out_idx][i]= ch > 0
+                outputs_dst_availabilities[out_idx][i]= ch > 0 and BIAS is None
                 # forward
                 self.on_propagate_forward((mask,MUL,BIAS),
                                           src_idx,src_out_idx,
                                           dst_idx,dst_in_idx)
-        new_input_channels = [m[0].sum().item() for m in self.forward_buffers]
+                
+        new_input_channels = [m[0].sum().item() if m[2] is None else 0 for m in self.forward_buffers]
         inputs_availabilities = [ch > 0 for ch in new_input_channels]
         
         # prevention of again running forward
@@ -302,6 +335,7 @@ class BidirectionalNode:
     def backward(self, 
                 mods:Dict[str,modifiers.Modifier]
                 ):
+        print("Node_idxb:",self.node_idx)
         out_mask_muls:List[modifiers.BACKWARD_TYPE] = []        
         # merge all backwarded masks and muls into single pairs for each node output
         for out_idx, single_out_mask_muls in enumerate(self.backward_buffers):
@@ -309,8 +343,9 @@ class BidirectionalNode:
             if len(single_out_mask_muls):
                 masks = [m for (m,mul) in single_out_mask_muls]
                 muls = [mul for (m,mul) in single_out_mask_muls]
-                mask = torch.logical_or(masks[0],*masks)
-                mul = torch.mul(torch.ones_like(muls[0]),*muls)
+                # mask = torch.logical_or(masks[0],*masks)
+                mask = utils.between_all(torch.logical_or,masks)
+                mul = utils.between_all(torch.mul,[torch.ones_like(muls[0]),*muls])
                 out_mask_muls.append((mask,mul))
             
             else:
@@ -353,15 +388,6 @@ class BidirectionalNode:
             # raise event for forward execution
             self.on_forward_available(self.node_idx)
 
-
-class Callable:
-    def __init__(self, container, method) -> None:
-        super().__init__()
-        self.container = container
-        self.method = method
-    
-    def __call__(self, *args) -> Any:
-        return self.method(self.container,tuple(args)) 
 
 class Scissors:
     
@@ -425,13 +451,13 @@ class Scissors:
         forward_propagation_queue = queue.Queue(len(self.connections))
         backward_propagation_queue = queue.Queue(len(self.connections))
         
-        forward_put = lambda x: forward_queue.put(x)
-        backward_put = lambda x: backward_queue.put(x)
-        forward_propagation_put = Callable(forward_propagation_queue,queue.Queue.put_nowait)
-        backward_propagation_put = Callable(backward_propagation_queue,queue.Queue.put_nowait)
+        forward_put = lambda x: forward_queue.put_nowait(x)
+        backward_put = lambda x: backward_queue.put_nowait(x)
+        forward_propagation_put = lambda *x: forward_propagation_queue.put_nowait(x)
+        backward_propagation_put = lambda *x: backward_propagation_queue.put_nowait(x)
         
         # add output node to backward queue  
-        backward_put(len(self.nodes)-1)
+        backward_put(len(self.nodes)-1)    
         
         # set nodes callbacks
         for node in self.nodes:
@@ -440,19 +466,17 @@ class Scissors:
             node.on_propagate_backward = backward_propagation_put
             node.on_propagate_forward = forward_propagation_put
         
-        cntr = 0
         while not forward_queue.empty()\
                 or not backward_queue.empty()\
                 or not forward_propagation_queue.empty()\
                 or not backward_propagation_queue.empty():
-            cntr += 0
             # propagate backward
             while not backward_propagation_queue.empty():
                 mask_mul,\
                 src_node_idx,src_out_idx,\
                 dst_node_idx,dst_in_idx = backward_propagation_queue.get_nowait()
                 # set mask_mul in src node backward buffers
-                self.nodes[src_node_idx].set_from_backward(mask_mul,src_out_idx,dst_node_idx,dst_in_idx)
+                self.nodes[src_node_idx].take_from_backward(mask_mul,src_out_idx,dst_node_idx,dst_in_idx)
                 
             # propagate forward
             while not forward_propagation_queue.empty():
@@ -460,7 +484,7 @@ class Scissors:
                 src_node_idx,src_out_idx,\
                 dst_node_idx,dst_in_idx = forward_propagation_queue.get_nowait()
                 # set mask_mul in src node backward buffers
-                self.nodes[dst_node_idx].set_from_forward(mask_mul_bias,dst_in_idx)
+                self.nodes[dst_node_idx].take_from_forward(mask_mul_bias,dst_in_idx)
                 
             # backward nodes modification
             while not backward_queue.empty():
@@ -473,13 +497,15 @@ class Scissors:
                 node_idx = forward_queue.get_nowait()
                 node = self.nodes[node_idx]
                 node.forward(self.nodes_modifiers)
-            
-            print(cntr)
-            cntr += 1
-            
-        print("Complete")
+                        
         # EXTRACT NEW MODEL DESCRIPTION
+        nodes_descriptions = [n.description for n in self.nodes]
+        for nd in nodes_descriptions:
+            for k,v in nd.items():
+                print(k,v)
+            print()
         # reindexation of nodes and connection,
+        
         # removing unused nodes and connections 
         
     def __call__(self):
