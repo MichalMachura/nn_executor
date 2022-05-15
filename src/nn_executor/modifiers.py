@@ -1,3 +1,4 @@
+from turtle import forward
 from typing import List, Tuple, Union
 import torch
 import torch.nn as nn
@@ -60,15 +61,10 @@ class Conv2dModifier(Modifier):
                       module.groups,
                       module.bias is not None,
                       module.padding_mode)
-        
-        with torch.no_grad():
-            m.weight[:] = module.weight[:]
-            
-            if module.bias is not None:
-                m.bias[:] = module.bias[:]
+        m.load_state_dict(module.state_dict())
         
         return m 
-        
+    
     def forward(self, 
                 in_module:nn.Conv2d, 
                 in_mask_mul_bias:List[FORWARD_TYPE],
@@ -100,9 +96,8 @@ class Conv2dModifier(Modifier):
                 # add bias of this conv
                 if BIAS is not None:
                     bias += BIAS
-                # apply output mul
-                bias = bias
-                return None, [(out_mask, out_mul, bias)]
+                
+                return None, [(out_mask, None, bias)]
             
             # input has some variability
             else:
@@ -135,7 +130,7 @@ class Conv2dModifier(Modifier):
                 return None, [(out_mask,None,BIAS)]
             else:
                 # module output is none -> zeroing mask
-                return None, [(out_mask,None, None)] 
+                return None, [(torch.zeros_like(out_mask),None, None)] 
         
     def backward(self, 
                 in_module:nn.Conv2d, 
@@ -149,10 +144,9 @@ class Conv2dModifier(Modifier):
         
         m = self.clone(in_module)
         with torch.no_grad():
-            m.weight[:] = multiplier.reshape(-1,1,1,1)*in_module.weight
-            
+            m.weight[:] = in_module.weight * multiplier.reshape(-1,1,1,1)
             if in_module.bias is not None:
-                m.bias[:] = (multiplier*in_module.bias)
+                m.bias[:] = (in_module.bias*multiplier)
         
         if ch_out > 0:
             in_mask = torch.ones(in_module.in_channels,dtype=torch.bool)
@@ -176,14 +170,8 @@ class BatchNorm2dModifier(Modifier):
                            in_module.momentum,
                            in_module.affine,
                            in_module.track_running_stats
-                           )
-        with torch.no_grad():
-            m.weight[:] = in_module.weight[:]
-            m.bias[:] = in_module.bias[:]
-            m.running_mean[:] = in_module.running_mean[:]
-            m.running_var[:] = in_module.running_var[:]
-            m.num_batches_tracked *= 0
-            m.num_batches_tracked += in_module.num_batches_tracked
+                           ).eval()
+        m.load_state_dict(in_module.state_dict())
         return m
         
     def forward(self,
@@ -218,7 +206,7 @@ class BatchNorm2dModifier(Modifier):
                                     in_module.momentum,
                                     in_module.affine,
                                     in_module.track_running_stats,
-                                    )
+                                    ).eval()
                 
                 with torch.no_grad():
                     mul = 1
@@ -246,7 +234,6 @@ class BatchNorm2dModifier(Modifier):
                 BIAS = B - W*M/torch.sqrt(V+EPS)
                 
                 return None, [(out_mask,None, BIAS),]
-            pass
         
         
     def backward(self, 
@@ -366,7 +353,7 @@ class PassActivationModifier(Modifier):
                      BIAS:torch.Tensor):
         with torch.no_grad():
             m = self.clone(in_module).eval()
-            BIAS = m(BIAS).flatten()
+            BIAS = m.forward(BIAS).flatten()
             return BIAS 
     
     def forward(self, 
@@ -426,14 +413,36 @@ class PassActivationModifier(Modifier):
         return m, [(mask,mul),], [(mask,None)]
 
 
+class UpsampleModifier(PassActivationModifier):
+    def __init__(self) -> None:
+        super().__init__(models.Upsample)
+        
+    def clone(self, in_module: models.Upsample) -> nn.Module:
+        m = models.Upsample(
+                        in_module.size,
+                        in_module.scale_factor,
+                        in_module.mode,
+                        in_module.align_corners
+                        )
+        return m
+
+
 class ReLUModifier(PassActivationModifier):
     def __init__(self) -> None:
         super().__init__(torch.nn.ReLU)
+
+    def clone(self, in_module: nn.ReLU) -> nn.Module:
+        m = nn.ReLU(in_module.inplace)
+        return m
 
 
 class LeakyReLUModifier(PassActivationModifier):
     def __init__(self) -> None:
         super().__init__(torch.nn.LeakyReLU)
+    
+    def clone(self, in_module: nn.LeakyReLU) -> nn.Module:
+        m = nn.LeakyReLU(in_module.negative_slope,in_module.inplace)
+        return m
 
 
 class IdentityModifier(PassActivationModifier):
@@ -467,80 +476,10 @@ class ElementwiseModifier(Modifier):
     def clone(self, in_module:models.Elementwise) -> nn.Module:
         m = self.ew_mod_cls(in_module.num)
         return m
+        
+    def forward(self, in_module: nn.Module, in_mask_mul_bias: List[FORWARD_TYPE], out_mask_mul: List[BACKWARD_TYPE]) -> Tuple[Union[nn.Module, None], List[FORWARD_TYPE]]:
+        raise NotImplementedError()
     
-    def mul_bias(self, 
-                 muls:List[torch.Tensor], 
-                 bias:List[torch.Tensor]):
-        # return mul, bias
-        mul = 1
-        for m in muls:
-            mul = mul * m
-        if muls:
-            mul = None
-            
-        return mul, sum(bias)
-    
-    def forward(self, 
-                in_module:models.Elementwise, 
-                in_mask_mul_bias:List[FORWARD_TYPE],
-                out_mask_mul:List[BACKWARD_TYPE],
-                ) -> Tuple[Union[nn.Module,None],
-                           List[FORWARD_TYPE]]:
-        #TODO
-        out_mask, out_mul = out_mask_mul[0]
-        ch_out = out_mask.sum().item()
-        
-        # output of this module is not needed
-        if ch_out == 0:
-            return None, [(out_mask, None, None),]
-        
-        biases = []
-        muls = []
-        cntr = 0
-        for i,(in_mask, in_mul, in_bias) in enumerate(in_mask_mul_bias):
-            ch_in = in_mask.sum().item()
-            
-            if torch.logical_xor(in_mask,out_mask).sum().item() > 0 \
-                    and ch_in > 0:
-                raise RuntimeError(f"Input {i}-th mask:{ch_in} should be the same as output:{ch_out}!!!")
-            
-            if ch_in == 0 and in_bias is not None:
-                raise RuntimeError(f"Input mask channel with {ch_in} non zero elements and bias cannot be used together!")
-        
-            if ch_in > 0:
-                # input is const
-                if in_bias is not None:
-                    biases.append(in_bias)
-                # input is variable
-                else:
-                    if in_mul:
-                        muls.append(in_mul)
-                    
-                    cntr += 1
-            # no input
-        
-        MUL, BIAS = self.mul_bias(muls,biases)
-            
-        # nothing variable - only bias
-        if cntr == 0:
-            return None, [(out_mask,None,BIAS),]
-        # sum 1 or more inputs and forward BIAS to next node(s)
-        else:
-            if BIAS is not None:
-                m = self.ew_mod_cls(cntr)
-                # TODO need to be saparated class for each type of operation
-                m = models.WithBatchNorm2d(m,ch_out)
-                with torch.no_grad():
-                    m.bn.bias[:] = BIAS[out_mask]
-                    m.bn.weight[:] *= 0
-                    m.bn.weight[:] += 1
-                    if MUL is not None:
-                        m.bn.weight[:] = MUL[out_mask]
-                
-                return m, [(out_mask, None, None),]
-                
-            return self.ew_mod_cls(cntr), [(out_mask,MUL,BIAS),]
-        
     def backward(self, 
                 in_module:models.Elementwise, 
                 out_mask_multipliers:List[BACKWARD_TYPE]
@@ -608,8 +547,10 @@ class AddModifier(ElementwiseModifier):
             mask = utils.between_all(torch.logical_and,masks)
             mask_or = utils.between_all(torch.logical_or,masks)
             ch = mask.sum().item()
+            xor = mask != mask_or
+            ch_xor = xor.sum().item()
             
-            if torch.logical_xor(mask,mask_or).sum().item() > 0:
+            if ch_xor > 0:
                 raise RuntimeError("Input masks are different")
             
             if ch != ch_out:
@@ -622,7 +563,7 @@ class AddModifier(ElementwiseModifier):
             m = models.Add(len(masks)+int(BIAS is not None))
             
             if BIAS is not None:
-                b = models.Variable(BIAS.reshape(1,-1,1,1))
+                b = models.Variable(BIAS[mask].reshape(1,-1,1,1))
                 m = models.MultiWithConst(m)
                 m.add(0,b)
             
@@ -763,7 +704,7 @@ class CatModifier(Modifier):
             if in_bias is not None:
                 biases.append(in_bias)
             else:
-                biases.append(torch.ones_like(in_mask,
+                biases.append(torch.zeros_like(in_mask,
                                             dtype=torch.float32))
                 
             ch_in = in_mask.sum().item()
@@ -799,7 +740,7 @@ class CatModifier(Modifier):
         
         # full input is bias
         elif len(valid_biases) == len(valid_shapes):
-            return None [(MASK,None,BIAS),]
+            return None, [(MASK,None,BIAS),]
         
         # some inputs are biases -> Cat + Variable 
         elif len(valid_biases) < len(valid_shapes):
@@ -938,9 +879,9 @@ class PrunerModifier(Modifier):
         self.replace_with_identity = replace_with_identity
     
     def clone(self, in_module:models.Pruner) -> nn.Module:
-        m = models.Pruner(in_module.ch,in_module.prunable,in_module.activated)
+        m = models.Pruner(in_module.ch,in_module.prunable,in_module.activated,in_module.threshold)
         with torch.no_grad():
-            m.weights[:] = in_module.weights[:]
+            m.pruner_weight[:] = in_module.pruner_weight[:]
         return m
     
     def forward(self, 
@@ -949,7 +890,6 @@ class PrunerModifier(Modifier):
                 out_mask_mul:List[BACKWARD_TYPE],
                 ) -> Tuple[Union[nn.Module,None],
                            List[FORWARD_TYPE]]:
-        # raise NotImplementedError()
         in_mask, in_mul, in_bias = in_mask_mul_bias[0]
         out_mask, out_mul = out_mask_mul[0]
         ch_in = in_mask.sum().item()

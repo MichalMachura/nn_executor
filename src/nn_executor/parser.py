@@ -1,8 +1,7 @@
-from logging import warning
 from typing import Any, Dict, List, Tuple, Union
 import torch
 from torch import nn
-from nn_executor import models
+from nn_executor import models, utils
 
 
 def backward_connections(dst_node_idx:int,
@@ -33,24 +32,22 @@ def save_output_tensors(src_node_idx:int,
             saved_outputs.append((t,src_node_idx,output_idx))
 
 
-
 SUPPORTED_MODULES = [
                     nn.Conv2d,
                     nn.MaxPool2d,
                     nn.BatchNorm2d,
                     nn.ReLU,
                     nn.LeakyReLU,
-                    nn.Upsample,
+                    models.Upsample,
                     models.Constant,
                     models.Variable,
                     models.Cat,
                     models.Sub,
                     models.Add,
                     models.Mul,
-                    # models.Identity, 
-                    # Modules like Identity should not be included or should clone input tensors to be describable
                     models.Pruner,
-                    models.ResidualPruner,
+                    # Modules like Identity should not be included or should clone input tensors to be describable
+                    models.Identity, 
                     ]
 
 
@@ -83,7 +80,7 @@ class Parser:
             output_tensors = [output_tensors]
                         
         if mod.__class__ not in self.supported_modules:
-            warning(mod.__class__.__name__+" is unsupported!\nThis could impact on correctness of parsing.")
+            # warning(mod.__class__.__name__+" is unsupported!\nThis could impact on correctness of parsing.")
             return
     
         self.layers.append(mod)
@@ -114,7 +111,8 @@ class Parser:
         hooks = self.__set_hooks(model)
         # parse by forward pass
         self.__add_inputs(*inputs)
-        outputs = model(*inputs)
+        with utils.EvalMode(model):
+            outputs = model(*inputs)
         # remove hooks
         self.__remove_hooks(hooks)
         

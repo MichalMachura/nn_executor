@@ -2,8 +2,8 @@ from unittest import result
 from matplotlib import container
 import torch
 from torch import nn
-from typing import Any, Dict, List, Tuple, Type, Union
-from nn_executor import modifiers, models, utils
+from typing import Any, Dict, Iterable, List, Tuple, Type, Union
+from nn_executor import modifiers, models, parser, utils, executor
 import queue
 
 
@@ -36,34 +36,26 @@ def on_propagate_forward(mask_mul:Tuple[torch.Tensor,torch.Tensor], # bool, floa
 def on_available(node_idx:int):
     print("on_available:", node_idx)
     pass
-
-
-def from_mask(L:List[Any], mask:List[bool])->List[Any]:
-    return [item for (item, available) in zip(L,mask) if available]
-
-
-def to_mask(L:List[Any], mask:List[bool], replace=None)->List[Any]:
-    len_L = len(L)
-    available_pos = sum(mask)
-    if len_L != available_pos:
-        raise RuntimeError(f"L has different {len(L)} number of elements than available in mask {available_pos}")
-    
-    new_L = []
-    cntr = 0
-    for available in mask:
-        # set item on position
-        if available:
-            new_L.append(L[cntr])
-            cntr += 1
-        # fill position
-        else:
-            new_L.append(replace)
-    
-    return new_L
     
 
 CONNECTION = Tuple[int,int,int,int]
 CONNECTION_ANCHOR = Tuple[int,int] # Node idx, input/output idx 
+
+def are_same(L1:Iterable,*L_other:Iterable) -> bool:
+    if len(L_other) == 0:
+        raise RuntimeError("To compare contaiers are needed at least 2 iterators.")
+    
+    lengths = [len(l) == len(L1) for l in L_other]
+    
+    if sum(lengths) != len(lengths):
+        return False
+    
+    for l in L_other:
+        for item, item_1 in zip(l, L1): 
+            if item != item_1:
+                return False
+    return True
+    
 
 class BidirectionalNode:
     def __init__(self, 
@@ -108,6 +100,9 @@ class BidirectionalNode:
     @property
     def description(self):
         sd = {}
+        sd['node_idx'] = self.node_idx
+        sd['module'] = self.module
+        
         sd['input_channels'] = self.inputs_channels.copy()
         sd['input_mask'] = self.inputs_availability.copy()
         sd['num_of_input'] = sum(self.inputs_availability)
@@ -115,9 +110,6 @@ class BidirectionalNode:
         sd['output_channels'] = self.outputs_channels.copy()
         sd['output_mask'] = self.outputs_availability.copy()
         sd['num_of_output'] = sum(self.outputs_availability)
-        
-        sd['node_idx'] = self.node_idx
-        sd['module'] = self.module
         
         sd['connections_as_src'] = []
         sd['connections_as_dst'] = []
@@ -175,9 +167,11 @@ class BidirectionalNode:
             elif dst_node_idx == self.node_idx:
                 self.src_nodes[dst_node_in_idx] = (src_node_idx, src_node_out_idx)
         
-        self.inputs_availability = [True for i in range(len(self.inputs_channels))]
-        self.outputs_availability = [True for i in range(len(self.outputs_channels))]
+        # set availabilities for nodes' inputs and outputs interfaces
+        self.inputs_availability = [self.src_nodes[i] is not None for i in range(len(self.inputs_channels))]
+        self.outputs_availability = [len(self.dst_nodes[i]) > 0 for i in range(len(self.outputs_channels))]
         self.outputs_dst_availability = [[True]*len(out_buffs) for out_buffs in self.backward_buffers]
+        
     
     @property
     def forward_ready(self):
@@ -266,15 +260,14 @@ class BidirectionalNode:
     def forward(self, 
                 mods:Dict[str,modifiers.Modifier]
                 ):
-        print("Node_idxf: ",self.node_idx)
         # empty node -> zeroed output masks
         if self.module is None:
             new_module = None
             out_mask_mul_bias = [(torch.zeros(ch,dtype=torch.bool), None, None) \
                                                     for ch in self.outputs_channels]
         else:
-            # get class name
-            cls = self.module.__class__.__name__
+            # get class
+            cls = self.module.__class__
             if cls not in mods:
                 raise RuntimeError(f"{cls} has not delivered appropriate modifier for node:{self.node_idx}")
             # make forward
@@ -335,7 +328,6 @@ class BidirectionalNode:
     def backward(self, 
                 mods:Dict[str,modifiers.Modifier]
                 ):
-        print("Node_idxb:",self.node_idx)
         out_mask_muls:List[modifiers.BACKWARD_TYPE] = []        
         # merge all backwarded masks and muls into single pairs for each node output
         for out_idx, single_out_mask_muls in enumerate(self.backward_buffers):
@@ -349,18 +341,21 @@ class BidirectionalNode:
                 out_mask_muls.append((mask,mul))
             
             else:
-                RuntimeError(f"Empty backwarded mask and multipliers for node:{self.node_idx} out:{out_idx}")
+                mask =torch.zeros(self.outputs_channels[out_idx],dtype=torch.bool)
+                mul = torch.ones_like(mask,dtype=torch.float32)
+                out_mask_muls.append((mask,mul))
+                Warning(f"Empty backwarded mask and multipliers for node:{self.node_idx} out:{out_idx}")
         
         # empty node -> zeroed input masks and ones muls
         if self.module is None:
             new_module = None
             in_mask_muls = [(torch.zeros(ch,dtype=torch.bool),torch.ones(ch,dtype=torch.bool)) \
-                                   for ch in self.from_mask(self.inputs_channels,'in')]
+                                   for ch in self.inputs_channels]
             out_mask_muls = [(torch.zeros(ch,dtype=torch.bool), None) \
-                                   for ch in self.from_mask(self.outputs_channels,'in')]
+                                   for ch in self.outputs_channels]
         else:
-            # get class name
-            cls = self.module.__class__.__name__
+            # get class
+            cls = self.module.__class__
             if cls not in mods:
                 raise RuntimeError(f"{cls} has not delivered appropriate modifier!")
             # make backward
@@ -431,8 +426,8 @@ class Scissors:
         # create modifiers
         in_modifier = modifiers.InputLayerModifier()
         out_modifier = modifiers.OutputLayerModifier()
-        self.nodes_modifiers[input_module.__class__.__name__] = in_modifier
-        self.nodes_modifiers[output_module.__class__.__name__] = out_modifier
+        self.nodes_modifiers[input_module.__class__] = in_modifier
+        self.nodes_modifiers[output_module.__class__] = out_modifier
     
     def __create_nodes(self):
         self.nodes = []
@@ -442,7 +437,9 @@ class Scissors:
             node = BidirectionalNode(module,node_idx,ch_in,ch_out,self.connections)
             self.nodes.append(node)
     
-    def __prune(self):
+    def __prune(self, 
+                t:torch.Tensor,
+                dst_modules:List[Type]):
         # create nodes for model description
         self.__create_nodes()
         # queues for execution of forward and backward passes
@@ -457,7 +454,9 @@ class Scissors:
         backward_propagation_put = lambda *x: backward_propagation_queue.put_nowait(x)
         
         # add output node to backward queue  
-        backward_put(len(self.nodes)-1)    
+        for node in self.nodes:
+            if node.backward_ready:
+                backward_put(node.node_idx)
         
         # set nodes callbacks
         for node in self.nodes:
@@ -465,7 +464,7 @@ class Scissors:
             node.on_forward_available = forward_put
             node.on_propagate_backward = backward_propagation_put
             node.on_propagate_forward = forward_propagation_put
-        
+            
         while not forward_queue.empty()\
                 or not backward_queue.empty()\
                 or not forward_propagation_queue.empty()\
@@ -499,15 +498,166 @@ class Scissors:
                 node.forward(self.nodes_modifiers)
                         
         # EXTRACT NEW MODEL DESCRIPTION
-        nodes_descriptions = [n.description for n in self.nodes]
-        for nd in nodes_descriptions:
-            for k,v in nd.items():
-                print(k,v)
-            print()
-        # reindexation of nodes and connection,
+        nodes_to_dst_connections:List[CONNECTION] = []
+        src_to_nodes_connections:List[CONNECTION] = []
+        nodes_inputs_masks:List[List[bool]] = []
+        nodes_outputs_masks:List[List[bool]] = []
+        nodes_inputs_channels:List[List[int]] = []
+        nodes_outputs_channels:List[List[int]] = []
+        nodes_modules:List[torch.nn.Module|None] = []
+        nodes_indices:List[int] = []
+        for node in self.nodes:
+            nd = node.description
+            nodes_to_dst_connections.extend(nd['connections_as_src'])
+            src_to_nodes_connections.extend(nd['connections_as_dst'])
+            nodes_inputs_masks.append(nd['input_mask'])
+            nodes_outputs_masks.append(nd['output_mask'])
+            nodes_inputs_channels.append(nd['input_channels'])
+            nodes_outputs_channels.append(nd['output_channels'])
+            nodes_indices.append(nd['node_idx'])
+            nodes_modules.append(nd['module'])
         
         # removing unused nodes and connections 
+        connections = nodes_to_dst_connections.copy()
+        # reindexation of nodes and connection,
+        reindexation_maps = self.__determine_reindexation_maps(nodes_inputs_masks, 
+                                                               nodes_outputs_masks, 
+                                                               nodes_modules)
+        nodes_indices_map, nodes_inputs_map, nodes_outputs_map = reindexation_maps
         
-    def __call__(self):
-        return self.__prune()
+        # REINDEXATE NODES, CONNECTIONS, MODULES, CHANNELS
+        (CONNECTIONS, 
+         UNIQUE_LAYERS, 
+         LAYERS_INDICES, 
+         LAYERS_IN_OUT_CH, 
+         INPUT_CHANNELS, 
+         OUTPUT_CHANNELS,
+         OUTPUTS) = self.__reindexate(nodes_inputs_masks, 
+                                        nodes_outputs_masks, 
+                                        nodes_inputs_channels, 
+                                        nodes_outputs_channels, 
+                                        nodes_modules, 
+                                        connections, 
+                                        nodes_indices_map, 
+                                        nodes_inputs_map, 
+                                        nodes_outputs_map)
+        # merge into dict
+        model_description ={
+                            'layers_indices':LAYERS_INDICES,
+                            'layers_in_out_channels':LAYERS_IN_OUT_CH,
+                            'unique_layers':UNIQUE_LAYERS,
+                            'connections':CONNECTIONS,
+                            'outputs':OUTPUTS,
+                            'inputs_channels':INPUT_CHANNELS,
+                            'outputs_channels':OUTPUT_CHANNELS,
+                            }
+
+        net = executor.Executor(model_description).eval()
+        
+        p = parser.Parser(dst_modules)
+        model_description = p.parse_module(net,t)
+        
+        return model_description
+
+    def __reindexate(self, 
+                     nodes_inputs_masks, 
+                     nodes_outputs_masks, 
+                     nodes_inputs_channels, 
+                     nodes_outputs_channels, 
+                     nodes_modules, 
+                     connections, 
+                     nodes_indices_map, 
+                     nodes_inputs_map, 
+                     nodes_outputs_map):
+        OUTPUTS = []
+        OUTPUT_IDX = len(nodes_modules)-1 # index of output layer
+        reindexed_connections = []
+        for src_idx,src_out_idx,dst_idx,dst_in_idx in connections:
+            src_out_map = nodes_outputs_map[src_idx]
+            dst_in_map = nodes_inputs_map[dst_idx]
+            C = (nodes_indices_map[src_idx],
+                 src_out_map[src_out_idx],
+                 nodes_indices_map[dst_idx],
+                 dst_in_map[dst_in_idx]
+                 )
+            # for non output layer add as connection 
+            if dst_idx != OUTPUT_IDX:
+                reindexed_connections.append(C)
+            # for output layer add as output src 
+            else:
+                OUTPUTS.append(C[:2]+C[-1:])
+        
+        reindexed_modules = []
+        reindexed_indices = []
+        reindexed_in_out_channels = []
+        for (module,
+             in_map,
+             in_channels,
+             out_map, 
+             out_channels)in zip(nodes_modules,
+                                  nodes_inputs_masks,
+                                  nodes_inputs_channels,
+                                  nodes_outputs_masks,
+                                  nodes_outputs_channels):
+            if module is None:
+                continue
+            
+            reindexed_modules.append(module)
+            reindexed_indices.append(len(reindexed_indices))
+            reindexed_in_out_channels.append(([ch for v,ch in zip(in_map,in_channels) if v],
+                                              [ch for v,ch in zip(out_map,out_channels) if v]))
+        
+        CONNECTIONS = reindexed_connections
+        UNIQUE_LAYERS = reindexed_modules[1:-1]
+        LAYERS_INDICES = [i-1 for i in reindexed_indices[1:-1]]
+        LAYERS_IN_OUT_CH = [ch_in_out for ch_in_out in reindexed_in_out_channels[1:-1]]
+        INPUT_CHANNELS = reindexed_in_out_channels[0][1]
+        OUTPUT_CHANNELS = reindexed_in_out_channels[-1][0]
+        
+        return CONNECTIONS,UNIQUE_LAYERS,LAYERS_INDICES,LAYERS_IN_OUT_CH,INPUT_CHANNELS,OUTPUT_CHANNELS,OUTPUTS
+
+    def __determine_reindexation_maps(self, nodes_inputs_masks, nodes_outputs_masks, nodes_modules):
+        nodes_indices_map = []
+        nodes_inputs_map = []
+        nodes_outputs_map = []
+        node_cntr = 0
+        for node_module, in_mask, out_mask in zip(nodes_modules,
+                                                  nodes_inputs_masks,
+                                                  nodes_outputs_masks):
+            # node removed
+            if node_module is None:
+                nodes_indices_map.append(None)
+                nodes_inputs_map.append(None)
+                nodes_outputs_map.append(None)
+                continue
+
+            # node appears
+            # new index of module
+            nodes_indices_map.append(node_cntr)
+            node_cntr += 1
+            
+            # map inputs
+            node_in_mask_map = []
+            in_cntr = 0
+            for v in in_mask:
+                node_in_mask_map.append(in_cntr if v else None)
+                in_cntr = in_cntr+1 if v else in_cntr
+            
+            # map outputs
+            node_out_mask_map = []
+            out_cntr = 0
+            for v in out_mask:
+                node_out_mask_map.append(out_cntr if v else None)
+                out_cntr = out_cntr+1 if v else out_cntr
+            
+            # append maps
+            nodes_inputs_map.append(node_in_mask_map)
+            nodes_outputs_map.append(node_out_mask_map)
+        
+        return nodes_indices_map,nodes_inputs_map,nodes_outputs_map
+    
+    def __call__(self, 
+                t:torch.Tensor,
+                dst_modules:List[Type]):
+        return self.__prune(t, dst_modules)
         

@@ -90,6 +90,7 @@ class TestScissors(unittest.TestCase):
              # x3 cat
              models.Parallel(models.Cat(1),
                              [
+                             models.Identity(),
                              torch.nn.Sequential(
                                     torch.nn.Conv2d(5,6,3, padding=1),
                                     shared.pruner([1,1,1,0,0,0]),
@@ -116,7 +117,6 @@ class TestScissors(unittest.TestCase):
                                     torch.nn.Conv2d(6,3,3, padding=1),
                                     shared.pruner([1,0,0]),
                                     ),
-                             models.Identity()
                              ]),
              
              shared.pruner([1,1,1,1,0,
@@ -132,7 +132,8 @@ class TestScissors(unittest.TestCase):
              
              torch.nn.Conv2d(8,5,3, padding=1),
              models.Parallel(models.Cat(1),[R1,R2]),
-             torch.nn.Conv2d(10,2,3, padding=1),
+             torch.nn.Conv2d(10,5,3, padding=1),
+             torch.nn.Conv2d(5,2,3, padding=1),
              torch.nn.Conv2d(2,4,3, padding=1),
              shared.pruner([1,1,0,1],False,True),
              ]
@@ -141,28 +142,28 @@ class TestScissors(unittest.TestCase):
         p = parser.Parser()
         # t = torch.rand((1,3,2*2**2,1*2**2),dtype=torch.float32)
         t = torch.rand((1,3,20*2**2,10*2**2),dtype=torch.float32)
-        model_description = p.parse_module(model,t)
+        
+        with utils.DifferentiateTensors(False):
+            model_description = p.parse_module(model,t)
         
         utils.save(('tmp.json','tmp.pth'),model_description)
         
-        print('Parsed model:')
-        print(model_description)
-        
         modifiers_map = {
-                        torch.nn.Conv2d.__name__:modifiers.Conv2dModifier(),
-                        torch.nn.MaxPool2d.__name__:modifiers.MaxPool2dModifier(),
-                        torch.nn.ReLU.__name__:modifiers.ReLUModifier(),
-                        torch.nn.BatchNorm2d.__name__:modifiers.BatchNorm2dModifier(),
-                        models.Pruner.__name__:modifiers.PrunerModifier(True),
-                        models.Identity.__name__:modifiers.IdentityModifier(),
-                        models.Cat.__name__:modifiers.CatModifier(),
-                        models.Add.__name__:modifiers.AddModifier(),
-                         }
+                        torch.nn.Conv2d:modifiers.Conv2dModifier(),
+                        torch.nn.MaxPool2d:modifiers.MaxPool2dModifier(),
+                        torch.nn.ReLU:modifiers.ReLUModifier(),
+                        torch.nn.BatchNorm2d:modifiers.BatchNorm2dModifier(),
+                        models.Pruner:modifiers.PrunerModifier(True),
+                        models.Identity:modifiers.IdentityModifier(),
+                        models.Cat:modifiers.CatModifier(),
+                        models.Add:modifiers.AddModifier(),
+                        }
         
         sc = prune.Scissors(model_description,modifiers_map)
+        with utils.DifferentiateTensors(False):
+            model_description = sc(t,parser.SUPPORTED_MODULES[:-1])
         
-        sc()
-        
+        utils.save(('tmp2.json','tmp2.pth'),model_description)
 
 if __name__ == '__main__':
     

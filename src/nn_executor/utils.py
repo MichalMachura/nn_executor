@@ -1,8 +1,8 @@
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, ClassVar, Dict, List, Tuple, Union, Type
 import torch
 from torch import nn
 import json
-
+from nn_executor import models
 
 
 def between_all(op, L:List):
@@ -11,13 +11,53 @@ def between_all(op, L:List):
         result = op(result,element)
     return result
 
-# def save(filepaths:Union[str,Tuple[str,str]],
-#          layers_indices:List[int],
-#          layers_in_out_channels:List[Tuple[List[int],List[int]]],
-#          unique_layers:List[nn.Module],
-#          connections:List[Tuple[int,int,int,int]],
-#          outputs:List[Tuple[int,int,int]], 
-#          **kwargs):
+
+def get_number_of_params(model):
+    p = 0
+
+    for param in model.parameters():
+        size = param.size()
+        tmp = 1
+        for i in range(len(size)):
+            tmp *= size[i] 
+        tmp = tmp if len(size) else 0
+        p += tmp
+
+    return p
+    
+    
+class DifferentiateTensors:
+    def __init__(self, differentiable:bool=True) -> None:
+        self.differentiable:bool = differentiable
+        self.buffered:bool = models.DIFFERENTIATE_TENSOR
+    
+    def __enter__(self, *args):
+        self.buffered = models.DIFFERENTIATE_TENSOR
+        models.DIFFERENTIATE_TENSOR = self.differentiable 
+    
+    def __exit__(self, *args):
+        global DIFFERENTIATE_TENSOR
+        DIFFERENTIATE_TENSOR = self.buffered
+
+class TrainingMode:
+    def __init__(self,model:torch.nn.Module, train:bool=True) -> None:
+        self.train:bool = train
+        self.model:torch.nn.Module = model
+        self.buffered_mode:bool = model.training
+    
+    def __enter__(self, *args):
+        self.buffered_mode = self.model.training
+        self.model.train(self.train) 
+    
+    def __exit__(self, *args):
+        self.model.train(self.buffered_mode)
+
+
+class EvalMode(TrainingMode):
+    def __init__(self, model: torch.nn.Module) -> None:
+        super().__init__(model, False)        
+        
+        
 def save(filepaths:Union[str,Tuple[str,str]],
          model_description:Dict[str,Any],
          ):
@@ -120,7 +160,7 @@ def load(file_paths:Union[str,Tuple[str,str]],
             indices.append((node_idx-1, u_idx))
     
     layers_indices = sorted(indices,key=lambda x:x[0])
-    layers_indices = [idx[1] for idx in indices]
+    layers_indices = [idx[1] for idx in layers_indices]
     
     # get in/out channels for each node
     unique_in_out_ch = [u[2] for u in unique_layers_recreators]

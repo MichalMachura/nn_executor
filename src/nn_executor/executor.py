@@ -1,20 +1,11 @@
 from typing import Any, Dict, List, Tuple
-from sympy import degree
 import torch
 from torch import nn
 from nn_executor import models
 
 
-def layer_from_config(config):
-    return
-
-
-def parse_config(config):
-    return
-
-
 def get_from_idx(x, idx:int):
-    
+
     if type(x) in [tuple, list]:
         return x[idx]
     
@@ -28,8 +19,10 @@ class Node:
     
     def __init__(self, 
                  layer:nn.Module,
-                 degree:Tuple[int,int]=(1,1)) -> None:
+                 degree:Tuple[int,int]=(1,1),
+                 node_idx:int=0) -> None:
         self.layer = layer
+        self.node_idx = node_idx
         self.outputs:List[Tuple[int, int,'Node']] = [] # [(dst_input_idx, src_output_idx, dst_node)]
         self.degree = degree
         self.ready_inputs_cntr = 0
@@ -44,11 +37,12 @@ class Node:
         # increase cntr
         self.ready_inputs_cntr += 1
         
-        if self.is_active():
+        if self.is_active:
             return self
         else:
             return None
     
+    @property
     def is_active(self):
         return self.ready_inputs_cntr == len(self.inputs_values)
     
@@ -59,13 +53,16 @@ class Node:
         
         # add this node to it's src 
         src.outputs.append((dst_input_idx,src_output_idx,self))
-        
+    
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(layer={self.layer}, degree={self.degree}, node_idx={self.node_idx})"
+    
     def __call__(self) -> List['Node']:
         # basic layer forward
         output = self.layer(*self.inputs_values)
-        
         # free inputs buffers
         self.inputs_values = [None for i in self.inputs_values]
+        self.ready_inputs_cntr = 0
         
         activated = []
         for dst_input_idx, src_output_idx, dst_node in self.outputs:
@@ -84,15 +81,16 @@ class Node:
 
 class InputNode(Node):
     def __init__(self, layer: nn.Module, num_of_inputs:int=1) -> None:
-        super().__init__(layer,(num_of_inputs,num_of_inputs))
+        super().__init__(layer,(num_of_inputs,num_of_inputs),0)
         self.inputs_values = [None for i in range(num_of_inputs)]
 
 
 class OutputNode(Node):
     def __init__(self, 
                  layer: nn.Module,
-                 num_of_outputs:int=1) -> None:
-        super().__init__(layer,(num_of_outputs,num_of_outputs))
+                 num_of_outputs:int,
+                 node_idx:int) -> None:
+        super().__init__(layer,(num_of_outputs,num_of_outputs),node_idx)
     
     def set_input(self, idx: int, x) -> 'Node':
         is_active =  super().set_input(idx, x)
@@ -100,12 +98,13 @@ class OutputNode(Node):
         return None
     
     def __call__(self):
-        # get buffers values
-        vals = self.inputs_values
+        # get buffered values
+        values = self.inputs_values
         # reset buffers
         self.inputs_values = [None for i in self.inputs_values]
+        self.ready_inputs_cntr = 0
         
-        return vals
+        return values
 
 
 class Executor(nn.Module):
@@ -122,9 +121,8 @@ class Executor(nn.Module):
         
         # get num of inputs and outputs of nodes
         layers_degree = [(len(in_out_ch[0]),len(in_out_ch[1])) for in_out_ch in layers_in_out_channels]
-
+        # instances of layers stay the same, only list is different
         self.model_description = model_description.copy()
-        
         # connections list is modified by some of the following functions
         self.update_connections(layers_indices=layers_indices, 
                                 layers_degree=layers_degree, 
@@ -179,15 +177,15 @@ class Executor(nn.Module):
         noo = len(outputs)
         
         nodes =  []
-        for layer_idx, degree in zip(layers_indices,layers_degree):
+        for i,(layer_idx, degree) in enumerate(zip(layers_indices,layers_degree)):
             L = unique_layers[layer_idx]
-            nodes.append(Node(L,degree=degree))
+            nodes.append(Node(L,degree=degree,node_idx=i+1))
         
         inL, outL = models.Identity(),models.Identity()
         
         nodes = [InputNode(inL,noi),
                  *nodes,
-                 OutputNode(outL,noo)]
+                 OutputNode(outL,noo,len(nodes)+1)]
         
         return nodes
     
@@ -203,11 +201,10 @@ class Executor(nn.Module):
         for i,x in enumerate(args):
             a = self.nodes[0].set_input(i,x)
         
-        if not self.nodes[0].is_active():
+        if not self.nodes[0].is_active:
             raise RuntimeError("First node has not been activated.")
         
-        active_layers = [self.nodes[0]]
-        
+        active_layers = [n for n in self.nodes if n.is_active]
         while len(active_layers):
             L = active_layers.pop(0)
             newly_activated = L()

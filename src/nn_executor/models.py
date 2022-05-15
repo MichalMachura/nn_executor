@@ -1,5 +1,4 @@
-from turtle import forward, position
-from typing import List, OrderedDict, Tuple
+from typing import List, Optional, Tuple
 import torch
 from torch import nn
 
@@ -14,7 +13,7 @@ class Identity(nn.Module):
     
     def forward(self, *args):
         if DIFFERENTIATE_TENSOR:
-            args = (a.clone() for a in args)
+            args = [a.clone() for a in args]
         
         if len(args) == 0:
             return None
@@ -24,6 +23,19 @@ class Identity(nn.Module):
         
         else:
             return args
+            
+
+class Upsample(nn.Upsample):
+    def __init__(self, 
+                 size = None, 
+                 scale_factor = None, 
+                 mode: str = 'nearest', 
+                 align_corners:bool = None) -> None:
+        super().__init__(size, scale_factor, mode, align_corners)
+
+    def extra_repr(self) -> str:
+        s = f"size={self.size}, scale_factor={self.scale_factor}, mode='{self.mode}', align_corners={self.align_corners}"
+        return s
 
 
 class Constant(nn.Module):
@@ -131,6 +143,7 @@ class MultiWithConst(nn.Module):
             module:nn.Module,
             ):
         with torch.no_grad():
+            self.add_module(f"const_input_at_pos_{pos}",module)
             self.params_pos.append((module,pos))
             
     def forward(self, *args):
@@ -148,11 +161,15 @@ class MultiWithConst(nn.Module):
             # add parameter to list of inputs
             joined_args.append(param())
         
+        DST_LEN = len(args)+len(params_pos)
+        while len(joined_args) != DST_LEN:
+            input_ = next(args_iter)
+            joined_args.append(input_)
+        
         # forward by module
         y = self.module(*joined_args)
         
         return y
-        
         
 
 class Cat(nn.Module):
@@ -203,107 +220,74 @@ def sigmoid(x:torch.Tensor,
             a:torch.Tensor,
             b:torch.Tensor
             ):
-    x = torch.exp(a*x-b)
-    return x / (1+x)
+    x = torch.exp(-a*x+b)
+    return 1 / (1+x)
+    # x = torch.exp(a*x-b)
+    # return x / (1+x)
 
 
 class Pruner(nn.Module):
         
     def __init__(self, 
-                 ch, 
-                 prunable=False,
-                 activated=True
+                 ch:int, 
+                 prunable:bool=False,
+                 activated:bool=True,
+                 threshold:float=0.75,
+                 num_of_appearances:int=1
                  ) -> None:
         super().__init__()
         self.ch = ch
+        self.threshold = threshold
         self.activated = activated
         self.prunable = prunable
-        self.weights = torch.nn.Parameter(torch.ones((1,self.ch,1,1), 
-                                                       dtype=torch.float32)*1.00376, 
-                                          requires_grad=activated)
-        self.parent_pruner:List[ResidualPruner] = []
-        
+        self.num_of_appearances = num_of_appearances
+        self.pruner_weight = torch.nn.Parameter(torch.ones((1,self.ch,1,1), 
+                                                     dtype=torch.float32)*1.0000004157469882103, 
+                                                requires_grad=activated)
+        # self.init_ones()
         if activated:
             self.adjustment_mode()
     
-    def state_dict(self, *args, **kw):
-        sd = super().state_dict(*args, **kw)
-        
-        if not self.activated:
-            sd.pop(args[0]+'weights')
-    
-        return sd
-    
     def extra_repr(self) -> str:
         s = ''
-        s += f"ch={self.ch}, prunable={self.prunable}, activated={self.activated}"
+        s += f"ch={self.ch}, prunable={self.prunable}, activated={self.activated}, threshold={self.threshold}, num_of_appearances={self.num_of_appearances}"
         return s
     
     def get_mask(self) -> Tuple[torch.Tensor,torch.Tensor]:
-        threshold=0.8
-        
-        with torch.no_grad():
-            
+        with torch.no_grad():    
             if self.prunable and self.activated:
-                mask = self.weights > threshold
+                mask = self.pruner_weight > self.threshold
             else:
-                mask = torch.ones_like(self.weights,dtype=torch.bool)
+                mask = torch.ones_like(self.pruner_weight,dtype=torch.bool)
             
             if self.activated:
-                multipliers = self(1)
+                multipliers = self.forward(torch.ones(1,dtype=torch.float32))
             else:
-                multipliers = torch.ones_like(self.weights,dtype=torch.float32)
+                multipliers = torch.ones_like(self.pruner_weight,dtype=torch.float32)
             
             return mask.flatten(), multipliers.flatten()
         
-    def set_parent(self, p:'ResidualPruner'):
-        self.parent_pruner = [p]
-        self.prunable = False
-        
     def adjustment_mode(self):
         with torch.no_grad():
-            device = self.weights.device
-            self.weights[:] = 1-torch.rand((1,self.ch,1,1),dtype=torch.float32,device=device)*0.01
-
-        self.weights.requires_grad = True
+            device = self.pruner_weight.device
+            self.pruner_weight[:] = 1-torch.rand((1,self.ch,1,1),dtype=torch.float32,device=device)*0.01
+        self.pruner_weight.requires_grad = True
     
     def init_ones(self):
         with torch.no_grad():
-            self.weights[:] = 1.00376
+            self.pruner_weight[:] = 1.0000004157469882103
 
-    
     def forward(self,x):
-    
         if not self.activated:
-            return x
+            # cloning for differentiate input and output tensor
+            return x.clone() if DIFFERENTIATE_TENSOR else x
         else:
-            s = sigmoid(self.weights, 
-                        torch.tensor(100.0, dtype=torch.float32),
-                        torch.tensor(86.0, dtype=torch.float32))
-            x = x * (s * self.weights**2)
+            s = sigmoid(self.pruner_weight, 100, 86)
+            # x = x * (s * self.pruner_weight**2)
+            m = s * self.pruner_weight
+            x = x * m
         
         return x
-
-
-class ResidualPruner(Pruner):
-    def __init__(self, 
-                 ch, 
-                 *dependent_prunners:Pruner, 
-                 mode='none', 
-                 prunable=False) -> None:
-        super().__init__(ch,mode,prunable)
-        self.dependent_pruners:List[Pruner] = []
-        
-        self.add_child_prunner(*dependent_prunners)
-    
-    @property
-    def num_of_blocks(self):
-        return len(self.dependent_pruners)
-    
-    def add_child_prunner(self, *ps:Pruner):
-        for p in ps:
-            self.dependent_pruners.append(p)
-            p.set_parent(self)
 
 
 class Parallel(nn.Module):
@@ -319,7 +303,7 @@ class Parallel(nn.Module):
             self.add_module('Branch_'+str(i),b)
         
     def forward(self, x):
-        results = (B(x) for B in self.branches)
+        results = [B(x) for B in self.branches]
         
         return self.merger(*results)
         
