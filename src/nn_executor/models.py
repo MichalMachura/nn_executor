@@ -130,7 +130,7 @@ class MultiWithConst(nn.Module):
         self.module:nn.Module = module
         self.params_pos:List[Tuple[torch.nn.Module,int]] = [] # Constants or Variables modules
         for mp in modules:
-            self.add((mp))
+            self.add(mp[1], mp[0])
         
     def __repr__(self):
         L = [(m,p) for m,p in self.params_pos]
