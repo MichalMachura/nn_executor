@@ -242,9 +242,9 @@ class Pruner(nn.Module):
         self.prunable = prunable
         self.num_of_appearances = num_of_appearances
         self.pruner_weight = torch.nn.Parameter(torch.ones((1,self.ch,1,1), 
-                                                     dtype=torch.float32)*1.0000008344650269, 
+                                                     dtype=torch.float32)*1.0000004157469882103, 
                                                 requires_grad=activated)
-        self.init_ones()
+        # self.init_ones()
         if activated:
             self.adjustment_mode()
     
@@ -275,7 +275,7 @@ class Pruner(nn.Module):
     
     def init_ones(self):
         with torch.no_grad():
-            self.pruner_weight[:] = 1.0000008344650269
+            self.pruner_weight[:] = 1.0000004157469882103
 
     def forward(self,x):
         if not self.activated:
@@ -357,30 +357,4 @@ class Parallel(nn.Module):
         results = [B(x) for B in self.branches]
         
         return self.merger(*results)
-
-
-# if __name__ == "__main__":
-    
-#     # find weight which gives multiplier equal to 1.0
-#     def fcn(p):
-#         return p*sigmoid(p,100,86)
-#     w = torch.nn.Parameter(torch.tensor(1.0),requires_grad=True)
-#     lr = 0.0001
-#     E = torch.inf
-#     for i in range(100):
-#         # loss computing
-#         v = fcn(w)
-#         e = torch.abs(1-v)
-#         # get grad
-#         e.backward()
-#         g = w.grad
-#         # update
-#         with torch.no_grad():
-#             w -= g*lr
-#         lr *= 1.2 if e < E else 1/2
-#         E = e.item()
-#         print(f"W: {w.item()} value: {v.item()} E: {E} g: {g.item()} lr: {lr}")
-#         w.grad *= 0
-
-    
-    
+        

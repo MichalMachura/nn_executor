@@ -86,7 +86,8 @@ class TestScissors(unittest.TestCase):
              torch.nn.ReLU(),
              shared.pruner([1,0,1,1,0]),
              torch.nn.MaxPool2d(2,2),
-             
+             models.Upsample(size=(160,80),mode='nearest'),
+             torch.nn.MaxPool2d(2,2),
              # x3 cat
              models.Parallel(models.Cat(1),
                              [
@@ -140,8 +141,7 @@ class TestScissors(unittest.TestCase):
         model = torch.nn.Sequential(*L)
         
         p = parser.Parser()
-        # t = torch.rand((1,3,2*2**2,1*2**2),dtype=torch.float32)
-        t = torch.rand((1,3,20*2**2,10*2**2),dtype=torch.float32)
+        t = torch.rand((1,3,80,40),dtype=torch.float32)
         
         with utils.DifferentiateTensors(False):
             model_description = p.parse_module(model,t)
@@ -157,6 +157,7 @@ class TestScissors(unittest.TestCase):
                         models.Identity:modifiers.IdentityModifier(),
                         models.Cat:modifiers.CatModifier(),
                         models.Add:modifiers.AddModifier(),
+                        models.Upsample:modifiers.UpsampleModifier(),
                         }
         
         sc = prune.Scissors(model_description,modifiers_map)

@@ -121,7 +121,8 @@ def pruner(mask:List[int]=[],
            activated=True):
     p = mm.Pruner(len(mask),prunable,activated)
     with torch.no_grad():
-        p.weights[:] = torch.tensor(mask).reshape(p.weights.shape)[:]*1.00376
+        p.init_ones()
+        p.pruner_weight[:] *= torch.tensor(mask).reshape(p.pruner_weight.shape)
     
     return p 
 
