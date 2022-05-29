@@ -1,8 +1,6 @@
-from unittest import result
-from matplotlib import container
 import torch
 from torch import nn
-from typing import Any, Dict, Iterable, List, Tuple, Type, Union
+from typing import Any, Dict, Iterable, List, Tuple, Type
 from nn_executor import modifiers, models, parser, utils, executor
 import queue
 

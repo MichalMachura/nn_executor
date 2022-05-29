@@ -1,4 +1,3 @@
-from turtle import forward
 from typing import List, Tuple, Union
 from warnings import warn
 import torch

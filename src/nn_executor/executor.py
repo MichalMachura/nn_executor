@@ -104,7 +104,14 @@ class OutputNode(Node):
         self.inputs_values = [None for i in self.inputs_values]
         self.ready_inputs_cntr = 0
         
-        return values
+        if len(values) == 0:
+            return None
+            
+        elif len(values) == 1:
+            return values[0]
+        
+        else:
+            return values
 
 
 class Executor(nn.Module):

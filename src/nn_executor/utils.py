@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, Dict, List, Tuple, Union, Type
+from typing import Any, Dict, List, Tuple, Union, Type
 import torch
 from torch import nn
 import json
@@ -114,7 +114,7 @@ def save(filepaths:Union[str,Tuple[str,str]],
 def import_module_of_class(variable:str,
                            module:str,
                            cmd:str) -> str:
-    return f'import {module}\n{variable} = {module}.{cmd}'
+    return f'import torch, {module}\n{variable} = {module}.{cmd}'
 
 
 def load(file_paths:Union[str,Tuple[str,str]],
@@ -132,8 +132,12 @@ def load(file_paths:Union[str,Tuple[str,str]],
         f.close()
     
         if len(file_paths) > 1 or strict:
-            model_description['unique_layers_state_dicts'] = torch.load(file_paths[1], map_location=map_location)
-    
+            try:
+                model_description['unique_layers_state_dicts'] = torch.load(file_paths[1], map_location=map_location)
+            except:
+                print("Problem with opening file", file_paths[1])
+                print("State dicts not loaded!!!")
+                pass
     unique_layers_recreators = model_description.pop('unique_layers_recreators')
     unique_layers_state_dicts = model_description.pop('unique_layers_state_dicts',
                                                       [{} for i in unique_layers_recreators])

@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 import torch
 from torch import nn
 
@@ -37,6 +37,9 @@ class Upsample(nn.Upsample):
         s = f"size={self.size}, scale_factor={self.scale_factor}, mode='{self.mode}', align_corners={self.align_corners}"
         return s
 
+class CONSTANTS:
+
+    BATCH_DIM_CAT_VAR_CONST = 1
 
 class Constant(nn.Module):
 
@@ -45,29 +48,23 @@ class Constant(nn.Module):
         self.t = torch.nn.Parameter(t,requires_grad=False)
 
     def __repr__(self,):
-        return f'Constant(t=torch.tensor({tuple(self.t.shape)},dtype={self.t.dtype}))'
+        return f'Constant(t=torch.zeros({tuple(self.t.shape)},dtype={self.t.dtype}))'
         
     def forward(self):
-        return self.t
+        return torch.cat([self.t]*CONSTANTS.BATCH_DIM_CAT_VAR_CONST,dim=0)
     
     def extra_repr(self) -> str:
         return 't='+str(self.t)
 
 
-class Variable(nn.Module):
+class Variable(Constant):
 
     def __init__(self, t:torch.Tensor) -> None:
-        super().__init__()
-        self.t = torch.nn.Parameter(t,requires_grad=True)
-    
-    def __repr__(self,):
-        return f'Variable(t=torch.tensor({tuple(self.t.shape)},dtype={self.t.dtype}))'
+        super().__init__(t)
+        self.t.requires_grad = True
         
-    def forward(self):
-        return self.t
-
-    def extra_repr(self) -> str:
-        return 't='+str(self.t)
+    def __repr__(self,):
+        return f'Variable(t=torch.zeros({tuple(self.t.shape)},dtype={self.t.dtype}))'
 
 
 class Elementwise(nn.Module):
