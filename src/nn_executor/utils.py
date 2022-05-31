@@ -385,7 +385,19 @@ def load(file_paths:Union[str,Tuple[str,str]],
     
     # update connections
     model_description['connections'] = connections
-            
+    
+    
+    # relative outputs to absolute
+    outputs = []
+    for src_idx, src_out_idx, dst_in_idx in model_description['outputs']:
+        src_idx_computed = len(layers_indices) + 1 + src_idx
+        # negative idx mean: use src_idx'th layer before (after) last layers
+        if src_idx < 0 and src_idx_computed >= 0:
+            outputs.append((src_idx_computed, src_out_idx, dst_in_idx))
+        else:
+            outputs.append((src_idx, src_out_idx, dst_in_idx))
+    
+    model_description['outputs'] = outputs
     
     return model_description
     
