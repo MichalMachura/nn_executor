@@ -146,7 +146,7 @@ class TestScissors(unittest.TestCase):
         with utils.DifferentiateTensors(False):
             model_description = p.parse_module(model,t)
         
-        utils.save(('tmp.json','tmp.pth'),model_description)
+        utils.save(('tests/tmp/tmp.json','tests/tmp/tmp.pth'),model_description)
         
         modifiers_map = {
                         torch.nn.Conv2d:modifiers.Conv2dModifier(),
@@ -164,7 +164,7 @@ class TestScissors(unittest.TestCase):
         with utils.DifferentiateTensors(False):
             model_description = sc(t,parser.SUPPORTED_MODULES[:-1])
         
-        utils.save(('tmp2.json','tmp2.pth'),model_description)
+        utils.save(('tests/tmp/tmp2.json','tests/tmp/tmp2.pth'),model_description)
 
 if __name__ == '__main__':
     
