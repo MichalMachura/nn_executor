@@ -1,9 +1,48 @@
 from typing import Any, Dict, List, Tuple, Union, Type
-from warnings import warn
 import torch
 from torch import nn
 import json
 from nn_executor import models
+import logging
+
+
+class Logger:
+
+    LOG_METHODS = [logging.info]
+
+
+    @staticmethod
+    def log(*args):
+         for m in Logger.LOG_METHODS:
+             m(*args)
+
+
+def log_print(*args, end='\n'):
+    print(*args, end=end)
+
+    Logger.log(*args)
+
+
+def get_number_of_params(model):
+    p = 0
+
+    for param in model.parameters():
+        size = param.size()
+        tmp = 1
+        for i in range(len(size)):
+            tmp *= size[i] 
+        tmp = tmp if len(size) else 0
+        p += tmp
+
+    return p
+
+
+def print_state_dict(state_dict, print_values=False):
+    for i,(k,v) in enumerate(state_dict.items()):
+        print("{}: {} -> {}".format(i,k,v if print_values else v.shape))
+
+
+
 
 
 def between_all(op, L:List):
@@ -188,8 +227,8 @@ def load(file_paths:Union[str,Tuple[str,str]],
             try:
                 model_description['layers_state_dicts'] = torch.load(file_paths[1], map_location=map_location)
             except:
-                print("Problem with opening file", file_paths[1])
-                print("State dicts not loaded!!!")
+                log_print("Problem with opening file", file_paths[1])
+                log_print("State dicts not loaded!!!")
                 pass
     
     layers_description = model_description.pop('layers')
@@ -376,7 +415,8 @@ def load(file_paths:Union[str,Tuple[str,str]],
                 
                 if not connection_established:
                     # check non established connections in user defined connections
-                    warn(f"Connection for dst={(dst_idx,dst_in_idx)} is not established.")
+                    log_print(f"Connection for dst={(dst_idx,dst_in_idx)} is not established.")
+                    logging.warn(f"Connection for dst={(dst_idx,dst_in_idx)} is not established.")
         
         
         # extend user connections 

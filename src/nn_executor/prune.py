@@ -11,7 +11,7 @@ def on_propagate_backward(mask:torch.Tensor, # bool
                           dst_node_idx:int,
                           dst_node_input_idx:int
                           )->None:
-    print("on_propagate_backward:",
+    utils.log_print("on_propagate_backward:",
           mask,
           (src_node_idx,src_node_output_idx), 
           (dst_node_idx,dst_node_input_idx))
@@ -24,7 +24,7 @@ def on_propagate_forward(mask_mul:Tuple[torch.Tensor,torch.Tensor], # bool, floa
                          dst_node_idx:int,
                          dst_node_input_idx:int
                          )->None:
-    print("on_propagate_forward:",
+    utils.log_print("on_propagate_forward:",
           mask_mul,
           (src_node_idx,src_node_output_idx), 
           (dst_node_idx,dst_node_input_idx))
@@ -32,7 +32,7 @@ def on_propagate_forward(mask_mul:Tuple[torch.Tensor,torch.Tensor], # bool, floa
 
 
 def on_available(node_idx:int):
-    print("on_available:", node_idx)
+    utils.log_print("on_available:", node_idx)
     pass
     
 
