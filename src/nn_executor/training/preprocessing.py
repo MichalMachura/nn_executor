@@ -751,9 +751,9 @@ class YOLODataGenerator(BaseGenerator):
                 th_img = cv.imread(os.path.join(self.path_to_dataset, 
                                                 self.images_labels[index][0]) )
                 # copy all bboxes
-                th_bbox = self.images_labels[index][1].copy()
+                th_bbox = np.array(self.images_labels[index][1]).copy()
                 # and their classes if present, else set zero class for each bblox
-                th_cls = self.images_labels[index][2].copy() if len(self.images_labels[index]) > 2 \
+                th_cls = np.array(self.images_labels[index][2]).copy() if len(self.images_labels[index]) > 2 \
                                                              else np.zeros_like(th_bbox[:,0],dtype=np.longlong)
                 
                 # optional error printing
@@ -764,11 +764,11 @@ class YOLODataGenerator(BaseGenerator):
                                                      self.images_labels[index][0]), 
                                         *self.images_labels[index]))
                 else:
-                    # augmentation before resize
-                    if self.augmentator:
-                        # normalize
-                        th_img = th_img.astype(np.float32) / 255
-                        th_img, th_bbox = self.augmentator(th_img, th_bbox)
+                    # # augmentation before resize
+                    # if self.augmentator:
+                    #     # normalize
+                    #     th_img = th_img.astype(np.float32) / 255
+                    #     th_img, th_bbox = self.augmentator(th_img, th_bbox)
                     
                     H_in, W_in = th_img.shape[:2]
                     W_dst, H_dst = self.input_size
@@ -778,7 +778,7 @@ class YOLODataGenerator(BaseGenerator):
                         if self.naive_resize:
                             th_img = cv.resize(th_img, 
                                                (W_dst, H_dst), 
-                                               interpolation=cv.INTER_LINEAR)
+                                               interpolation=cv.INTER_AREA if self.augmentator else cv.INTER_LINEAR)
                             W_new = W_dst
                             H_new = H_dst
                         else:
@@ -793,6 +793,12 @@ class YOLODataGenerator(BaseGenerator):
                     # normalization if previously where not applied
                     if not self.augmentator:
                         th_img = th_img.astype(np.float32) / 255
+                    
+                    # augmentation
+                    if self.augmentator:
+                        # normalize
+                        th_img = th_img.astype(np.float32) / 255
+                        th_img, th_bbox = self.augmentator(th_img, th_bbox)
                     
                     # save in dst out array / lists
                     X[pos,:,:,:] = th_img.astype(np.float32)

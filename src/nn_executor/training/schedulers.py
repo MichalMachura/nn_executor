@@ -14,7 +14,7 @@ class BaseScheduler:
 
 class LossDependentScheduler(BaseScheduler):
 
-    def __init__(self, mul=2.0, div=4, init_loss=-np.inf, init_lr=1, lr_min=1e-5, lr_max=1):
+    def __init__(self, mul=2.0, div=4, init_loss=np.inf, init_lr=1, lr_min=1e-5, lr_max=1):
         super().__init__()
         self.init_lr = init_lr
         self.init_loss = init_loss
@@ -45,11 +45,28 @@ class LossDependentScheduler(BaseScheduler):
              epoch:int):
         # calculate lr
         lr = self.calc_lr(config, loss)
-
+        lr_hist = config.get('scheduler_lr_history',[])
+        prev_loss = config.get('scheduler_prev_loss',self.init_loss)
+        
+        current_lr = []
         # set optimizer's lr
         for p in optimizer.param_groups:
             if 'lr' in p.keys():
+                lr = p['lr']
+                # decide of new value of lr
+                lr *= self.mul if loss < prev_loss else self.div
+                lr = max(self.lr_min, min(lr, self.lr_max))
+                # update
                 p['lr'] = lr
+                # store
+                current_lr.append(lr)
+        
+        # store info about lr for each all groups
+        lr_hist.append(current_lr)
+        config['scheduler_lr_history'] = lr_hist
+        # store loss value
+        config['scheduler_prev_loss'] = loss
+        
 
 
 

@@ -127,7 +127,7 @@ def save(filepaths:Union[str,Tuple[str,str]],
                               layers_in_out_channels):
         unique_layers_in_out[idx] = in_out_ch
     
-    unique_layers_recreators = [[nodes,str(L),in_out_ch,L.__class__.__module__] \
+    unique_layers_recreators = [[nodes,str(L.__class__.__module__)+'.'+str(L),in_out_ch] \
                                 for L,in_out_ch,nodes in zip(unique_layers, 
                                                        unique_layers_in_out,
                                                        unique_layers_nodes)]
