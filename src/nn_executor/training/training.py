@@ -131,7 +131,8 @@ class NetTrainer:
 
     def fit(self, 
               train_generator:prep.BaseGenerator,
-              val_generator:prep.BaseGenerator=None):
+              val_generator:prep.BaseGenerator=None,
+              scheduler_every_batch=-1):
         # get model device
         dev = next(self.model.parameters()).device
         # get scheduler object
@@ -190,17 +191,22 @@ class NetTrainer:
                 # backward propagation
                 loss.backward()
                 
-                if ((i+1) % update_period) == 0:
-                    # update model params
-                    self.optimizer.step()
-                    # reset gradient
-                    self.optimizer.zero_grad()
-                    
                 # calculate metrics
                 metrics_dict = compute_metrics(self.metrics, outputs, labels)
                 # compute mean loss and metrics
                 running_loss = mean_loss(running_loss, loss.item()*update_period, i*train_generator.batch_size, 1.0*batch_size)
                 running_metrics = mean_dict(running_metrics, metrics_dict, i*train_generator.batch_size, 1.0*batch_size)
+                
+                # update based on batch number/idx
+                if ((i+1) % update_period) == 0:
+                    # update model params
+                    self.optimizer.step()
+                    # reset gradient
+                    self.optimizer.zero_grad()
+                    # when frequent scheduler step
+                    if scheduler_every_batch > 0 and ((i+1) % scheduler_every_batch) == 0:
+                        scheduler.step(self.optimizer, self.config, running_loss, epoch)
+                    
                 # exec. time 
                 batches_time = time.time() - t0
                 # display bar

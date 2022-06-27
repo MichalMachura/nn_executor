@@ -61,8 +61,8 @@ class Node:
         # basic layer forward
         output = self.layer(*self.inputs_values)
         # free inputs buffers
-        self.inputs_values = [None for i in self.inputs_values]
         self.ready_inputs_cntr = 0
+        self.inputs_values = [None for i in self.inputs_values]
         
         activated = []
         for dst_input_idx, src_output_idx, dst_node in self.outputs:
