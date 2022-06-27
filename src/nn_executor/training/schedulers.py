@@ -1,3 +1,4 @@
+import math
 from typing import Dict
 import numpy as np
 import torch
@@ -68,7 +69,7 @@ class LossDependentScheduler(BaseScheduler):
         config['scheduler_prev_loss'] = loss
         
 
-class CosineScheduler(schedulers.BaseScheduler):
+class CosineScheduler(BaseScheduler):
     
     def __init__(self, iter_max:int, lr_min=1e-8, lr_max=1e-2):
         super().__init__()
@@ -83,13 +84,13 @@ class CosineScheduler(schedulers.BaseScheduler):
              epoch:int):
         
         e = epoch if epoch < self.iter_max else self.iter_max
-        lr_current = self.lr_min + 0.5*(self.lr_max-self.lr_min) *(1+torch.cos(torch.tensor(torch.pi* e/self.iter_max), dtype=torch.float32))
+        lr_current = self.lr_min + 0.5*(self.lr_max-self.lr_min) *(1+math.cos(torch.pi* e/self.iter_max))
 
         # set optimizer's lr
         for p in optimizer.param_groups:
             if 'lr' in p.keys():
                 p['lr'] = lr_current
-                
+        
         # store info about lr for each all groups
         H = config.get('scheduler_lr_history', [])
         H.insert(epoch,lr_current)
