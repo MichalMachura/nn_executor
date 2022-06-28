@@ -23,21 +23,6 @@ class LossDependentScheduler(BaseScheduler):
         self.div = 1/div
         self.lr_min = lr_min
         self.lr_max = lr_max
-
-    # def calc_lr(self, config, loss):
-    #     lr = config.get('scheduler_lr',self.init_lr)
-    #     prev_loss = config.get('scheduler_prev_loss',self.init_loss)
-        
-    #     # decide of lr change 
-    #     lr *= self.mul if loss < prev_loss else self.div
-    #     lr = max(self.lr_min, min(lr, self.lr_max))
-        
-    #     # update config
-    #     config['scheduler_lr'] = lr
-    #     config['scheduler_prev_loss'] = loss
-        
-    #     return lr
-        
         
     def step(self, 
              optimizer:torch.optim.Optimizer, 
