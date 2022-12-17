@@ -1,5 +1,5 @@
 *.egg-info
-dist
+# dist
 __pycache__
 *.pth
 *.json
