@@ -344,19 +344,19 @@ class AllOrNothingPruner(Pruner):
 class YOLO(torch.nn.Module):
     """
     You Only Look Once:
-    Assume N as num of anchors and C as num of classes.
-    Validity - N channels are transformed with sigmoid function.
-    Classification - C*N channels are transformed with 'cls_fcn' function.
-    X object center coord - N channels are transformed with sigmoid function and there is added column idx.
-    Y object center coord - N channels are transformed with sigmoid function and there is added row idx.
-    X and Y coordinates are then rescaled to original image scale.
-    Width - N channels are transformed with exponential function and multiplied by anchors width.
-    Height - N channels are transformed with exponential function and multiplied by anchors height.
+    Assume N as num of anchors and C as num of classes.\n
+    Validity - N channels are transformed with sigmoid function.\n
+    Classification - C*N channels are transformed with 'cls_fcn' function.\n
+    X object center coord - N channels are transformed with sigmoid function and there is added column idx.\n
+    Y object center coord - N channels are transformed with sigmoid function and there is added row idx.\n
+    X and Y coordinates are then rescaled to original image scale.\n
+    Width - N channels are transformed with exponential function and multiplied by anchors width.\n
+    Height - N channels are transformed with exponential function and multiplied by anchors height.\n
 
-    Inputs: tensor to transform and network image (to obtain it's shape).
-    Return tensor after YOLO transformation applied:
-    Output channels are grouped by type (instead of anchors) in the following order:
-    [V, CLS, X, Y, W, H]
+    Inputs: tensor to transform and network image (to obtain it's shape).\n
+    Return tensor after YOLO transformation applied:\n
+    Output channels are grouped by type (instead of anchors) in the following order:\n
+    [V, CLS, X, Y, W, H]\n
     """
     def __init__(self,
                  anchors: List[Union[List[int], int]],
@@ -428,9 +428,19 @@ class YOLO(torch.nn.Module):
 
 
 class YOLOAnchorMul(YOLO):
+    """
+    Anchors are multiplied by scalers as non negative values.
+
+    Module contains additional parameter 'anchors_mul'.
+
+    This parameter is first transformed exponentially.
+
+    The result then is multiplied with original anchors.
+    """
+
     def __init__(self, anchors: torch.Tensor) -> None:
         super().__init__(anchors)
-        self.anchors_mul = torch.nn.Parameter(torch.rand_like(anchors)*0.1-0.05, requires_grad=True)
+        self.anchors_mul = torch.nn.Parameter(torch.rand_like(anchors)*0.1 - 0.05, requires_grad=True)
 
     @property
     def anchors(self):
