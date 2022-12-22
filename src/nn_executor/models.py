@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 import torch
 from torch import nn
 
@@ -338,6 +338,104 @@ class AllOrNothingPruner(Pruner):
                 multipliers = torch.ones_like(self.pruner_weight,dtype=torch.float32)
 
         return mask.flatten(), multipliers.flatten()
+
+
+
+class YOLO(torch.nn.Module):
+    """
+    You Only Look Once:
+    Assume N as num of anchors and C as num of classes.
+    Validity - N channels are transformed with sigmoid function.
+    Classification - C*N channels are transformed with 'cls_fcn' function.
+    X object center coord - N channels are transformed with sigmoid function and there is added column idx.
+    Y object center coord - N channels are transformed with sigmoid function and there is added row idx.
+    X and Y coordinates are then rescaled to original image scale.
+    Width - N channels are transformed with exponential function and multiplied by anchors width.
+    Height - N channels are transformed with exponential function and multiplied by anchors height.
+
+    Inputs: tensor to transform and network image (to obtain it's shape).
+    Return tensor after YOLO transformation applied:
+    Output channels are grouped by type (instead of anchors) in the following order:
+    [V, CLS, X, Y, W, H]
+    """
+    def __init__(self,
+                 anchors: List[Union[List[int], int]],
+                 cls_fcn: str = 'sigmoid') -> None:
+        """
+        _summary_
+
+        :param anchors: list of shape (N,2) or (N*2,).
+            Sequence of anchors sizes (width, height).
+        :param cls_fcn: str, one of ['sigmoid', 'softmax', 'softmin']
+        """
+        super().__init__()
+        anchors = anchors.reshape((1,-1,2,1)).to(torch.float32)
+        self._anchors = torch.nn.Parameter(anchors, requires_grad=False)
+        self.cls_fcn = cls_fcn
+        self.create_grid()
+
+    @property
+    def anchors(self):
+        return self._anchors
+
+    def extra_repr(self):
+        s = f"anchors={self.anchors.reshape(-1,2).detach().tolist()}, cls_fcn='{self.cls_fcn}'"
+        return s
+
+    def create_grid(self, HW=(10,20)):
+        x_indeces = torch.arange(0, HW[1], dtype=torch.long)
+        self.grid_X = x_indeces.reshape(1, 1, 1, -1).repeat(1, 1, HW[0], 1)
+
+        y_indeces = torch.arange(0, HW[0], dtype=torch.long)
+        self.grid_Y = y_indeces.reshape(1,1,-1,1).repeat(1, 1, 1, HW[1])
+
+    def forward(self, x:torch.Tensor, network_input:torch.Tensor):
+        device = x.device
+        num_of_anchors = self.anchors.numel() // 2
+        noa = num_of_anchors
+
+        out_W, out_H = x.shape[-2:][::-1]
+        in_W, in_H = network_input.shape[-2:][::-1]
+        scale_W, scale_H = in_W / out_W, in_H / out_H
+
+        # update grid
+        if self.grid_X.shape[-1] != out_W or self.grid_X.shape[-2] != out_H:
+            with torch.no_grad():
+                self.create_grid((out_H,out_W))
+
+        self.grid_X = self.grid_X.to(device)
+        self.grid_Y = self.grid_Y.to(device)
+
+        V = torch.sigmoid(x[:,:noa,:,:])
+
+        CLS = x[:,noa:-4*noa,:,:]
+        if self.cls_fcn == 'sigmoid':
+            CLS = torch.sigmoid(CLS)
+        elif self.cls_fcn == 'softmax':
+            CLS = torch.softmax(CLS, dim=1)
+        elif self.cls_fcn == 'softmin':
+            CLS = torch.softmax(-CLS, dim=1)
+
+        X = (torch.sigmoid(x[:,-4*noa:-3*noa,:,:]) + self.grid_X) * scale_W
+        Y = (torch.sigmoid(x[:,-3*noa:-2*noa,:,:]) + self.grid_Y) * scale_H
+
+        W = torch.exp(x[:,-2*noa:-noa,:,:]) * self.anchors[:,:,:1,:]
+        H = torch.exp(x[:,-noa:,:,:]) * self.anchors[:,:,1:,:]
+
+        OUT = torch.cat([V, CLS, X, Y, W, H], dim=1)
+
+        return OUT
+
+
+class YOLOAnchorMul(YOLO):
+    def __init__(self, anchors: torch.Tensor) -> None:
+        super().__init__(anchors)
+        self.anchors_mul = torch.nn.Parameter(torch.rand_like(anchors)*0.1-0.05, requires_grad=True)
+
+    @property
+    def anchors(self):
+        mul = torch.exp(self.anchors_mul)
+        return self._anchors * mul
 
 
 class Parallel(nn.Module):
