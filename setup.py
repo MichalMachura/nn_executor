@@ -13,7 +13,7 @@ if __name__ == '__main__':
           author_email='michal.m.machura@gmail.com',
           description='Pytorch models serializer and deserializer - executor',
           python_requires='>=3.7, <4',
-          package_dir={'':'src'},
+          package_dir={'': 'src'},
           download_url='https://github.com/MichalMachura/nn_executor',
           install_requires=packages,
           )
