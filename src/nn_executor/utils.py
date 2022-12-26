@@ -238,10 +238,12 @@ def load(file_paths:Union[str,Tuple[str,str]],
                                                 [{} for i in layers_description])
 
     # extract descriptions
-    nodes_indices, layers, nodes_channels, modules = [],[],[],[]
+    nodes_indices, layers, nodes_channels, modules = [], [], [], []
 
     # init connections if not defined
-    model_description['connections'] = model_description.get('connections',[])
+    model_description['connections'] = model_description.get('connections', [])
+    # get pre defined variables to use with models recreations
+    locals = model_description.get('locals', {}).copy()
 
     # for auto channels deduction use only first input
     prev_ch = model_description['inputs_channels'][0]
@@ -264,7 +266,8 @@ def load(file_paths:Union[str,Tuple[str,str]],
             module_name, layer_class = split_module_class(layer_desc[0])
 
         # [module.layer, ch_out]
-        elif check_format(layer_desc, [str, int]):
+        elif check_format(layer_desc, [str, int])\
+                or check_format(layer_desc, [str, str]):
             node_indices = [free_idx]
             channels = [[prev_ch],[layer_desc[1]]]
             # split module and class constructor
@@ -286,7 +289,8 @@ def load(file_paths:Union[str,Tuple[str,str]],
             module_name, layer_class = split_module_class(layer_desc[1])
 
         # [indices_list, module.layer, ch_out]
-        elif check_format(layer_desc, [list, str, int]):
+        elif check_format(layer_desc, [list, str, int])\
+                or check_format(layer_desc, [list, str, str]):
             node_indices = layer_desc[0].copy()
             channels = [[prev_ch],[layer_desc[2]]]
             # split module and class constructor
@@ -331,6 +335,17 @@ def load(file_paths:Union[str,Tuple[str,str]],
         if not indices_availability(node_indices, indices_in_use):
             raise RuntimeError("Proposed indices", node_indices, " are not proper for:", layer_desc)
 
+        # convert python code to ints
+        def get_ch(ch):
+            if isinstance(ch, str):
+                lcs = locals
+                exec("__val=" + ch, globals(), lcs)
+                ch = lcs['__val']
+
+            return ch
+
+        channels = [[ get_ch(ch) for ch in channels_list] for channels_list in channels]
+
         nodes_indices.append(node_indices)
         nodes_channels.append(channels)
         layers.append(layer_class)
@@ -343,12 +358,12 @@ def load(file_paths:Union[str,Tuple[str,str]],
 
     # recreate torch modules
     layers_nn_modules = []
-    lcl, glb = {}, globals()
+    lcs, glb = locals, globals()
     for class_call, module_name in zip(layers, modules):
         # run dynamic python
-        cmd = command_transformer('L',module_name,class_call)
-        exec(cmd, glb, lcl)
-        L:nn.Module = lcl['L']
+        cmd = command_transformer('__L',module_name,class_call)
+        exec(cmd, glb, lcs)
+        L: nn.Module = lcs['__L']
         layers_nn_modules.append(L)
 
     # load state dicts

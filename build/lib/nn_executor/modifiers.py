@@ -1,4 +1,5 @@
 from typing import List, Tuple, Union
+from warnings import warn
 import torch
 import torch.nn as nn
 from nn_executor import models, utils
@@ -424,6 +425,11 @@ class UpsampleModifier(PassActivationModifier):
                         in_module.align_corners
                         )
         return m
+    
+    def process_bias(self, 
+                     in_module:nn.Module,
+                     BIAS:torch.Tensor):
+        return BIAS.clone() 
 
 
 class ReLUModifier(PassActivationModifier):
@@ -813,17 +819,22 @@ class OutputLayerModifier(Modifier):
                 out_mask_mul:List[BACKWARD_TYPE],
                 ) -> Tuple[Union[nn.Module,None],
                            List[FORWARD_TYPE]]:
-        in_mask, in_mul, in_bias = in_mask_mul_bias[0]
-        
+        channels = []
         for in_mask, in_mul, in_bias in in_mask_mul_bias:
-            if in_mask.sum().item() < in_mask.flatten().shape[0]:
+            ch = in_mask.sum().item()
+            if ch == 0 or in_bias is not None:
+                warn("Removed one of outputs.")
+                continue
+            if ch < in_mask.flatten().shape[0]:
                 raise RuntimeError(f"Output layer should not be pruned!!!")
             if in_mul is not None:
                 raise RuntimeError(f"Output layer does not support in_mul")
             if in_bias is not None:
                 raise RuntimeError(f"Output layer does not support in_bias")
+        m = models.OutputLayer(channels)
         
-        return self.clone(in_module), []
+        # return self.clone(in_module), []
+        return m, []
     
     def backward(self, 
                  in_module: models.OutputLayer,  
