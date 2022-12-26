@@ -412,9 +412,13 @@ class YOLO(torch.nn.Module):
         if self.cls_fcn == 'sigmoid':
             CLS = torch.sigmoid(CLS)
         elif self.cls_fcn == 'softmax':
-            CLS = torch.softmax(CLS, dim=1)
+            sh = CLS.shape
+            CLS = CLS.reshape(sh[0],-1, noa,*sh[2:])
+            CLS = torch.softmax(CLS, dim=1).reshape(sh)
         elif self.cls_fcn == 'softmin':
-            CLS = torch.softmax(-CLS, dim=1)
+            sh = CLS.shape
+            CLS = CLS.reshape(sh[0],-1, noa,*sh[2:])
+            CLS = torch.softmax(-CLS, dim=1).reshape(sh)
 
         X = (torch.sigmoid(x[:,-4*noa:-3*noa,:,:]) + self.grid_X) * scale_W
         Y = (torch.sigmoid(x[:,-3*noa:-2*noa,:,:]) + self.grid_Y) * scale_H
