@@ -1,4 +1,5 @@
 from crypt import methods
+from functools import singledispatch
 import numpy as np
 import cv2 as cv
 import matplotlib.pyplot as plt
@@ -23,21 +24,21 @@ def seconds_to_hmsms(seconds):
     txt += str(min)+'[min]:' if min else ''
     txt += str(s)+'[s]:' if s else ''
     txt += str(ms)+'[ms]'
-    
+
     return txt
 
 
 def bar(value, max_value, pre_text='', post_text='', length=100, end='', completed_char='█', in_progress_char='>', to_process_char=' '):
-	
+
 	state = int(float(value)/max_value*length)
 	rest = length - state
-		
+
 	s = '\r'+ pre_text + ' [' + completed_char*state
 
 	if rest > 0:
 		s += in_progress_char
-		rest -= 1  
-	
+		rest -= 1
+
 	s += to_process_char*rest
 	s += '] '
 	s += '['+str(value)+'/'+str(max_value)+'] '
@@ -45,18 +46,18 @@ def bar(value, max_value, pre_text='', post_text='', length=100, end='', complet
 	s += post_text
 
 	log_print(s, end=end)
-	
+
 
 def draw_bbox(img, bbox, color=(255,0,0), thickness=1):
 	"""
 	Draw bounding box on image img with given color and line's thickness
-	:param img: image np.array 
+	:param img: image np.array
 	:param bbox: bounding box np.array([xc,yc,w,h])
-	:param color: tuple(RGB) or nuber value for intensity image 
+	:param color: tuple(RGB) or nuber value for intensity image
 	:param thickness: line size
-	:return: img with drawn bbox  
+	:return: img with drawn bbox
 	"""
-	xmin,xmax,ymin,ymax =  bbox[0]-bbox[2]/2,bbox[0]+bbox[2]/2,bbox[1]-bbox[3]/2,bbox[1]+bbox[3]/2 
+	xmin,xmax,ymin,ymax =  bbox[0]-bbox[2]/2,bbox[0]+bbox[2]/2,bbox[1]-bbox[3]/2,bbox[1]+bbox[3]/2
 	img = cv.rectangle(img,(int(xmin), int(ymin)), (int(xmax), int(ymax)),color, thickness)
 
 	return img
@@ -74,22 +75,52 @@ def unravel_index(index, shape):
     return tuple(reversed(out))
 
 
+@singledispatch
 def xcycwh_to_ltrb(bbox_batch):
+    raise NotImplementedError()
+
+@xcycwh_to_ltrb.register
+def _torch(bbox_batch: torch.Tensor) -> torch.Tensor:
     # move center to left top
-    bbox_batch[:,:2] -= bbox_batch[:,-2:]/2
+    LT = bbox_batch[:,:2] - bbox_batch[:,-2:]/2
     # change wh into right bottom
-    bbox_batch[:,-2:] += bbox_batch[:,:2]
-    
-    return bbox_batch
+    RB = LT + bbox_batch[:,-2:]
+    LTRB = torch.cat([LT, RB], dim=1)
+    return LTRB
+
+@xcycwh_to_ltrb.register
+def _numpy(bbox_batch: np.ndarray) -> np.ndarray:
+    # move center to left top
+    LT = bbox_batch[:,:2] - bbox_batch[:,-2:]/2
+    # change wh into right bottom
+    RB = LT + bbox_batch[:,-2:]
+    LTRB = np.concatenate()([LT, RB], axis=1)
+    return LTRB
 
 
+@singledispatch
 def ltrb_to_xcycwh(bbox_batch):
+    raise NotImplementedError()
+
+@ltrb_to_xcycwh.register
+def _torch(bbox_batch: torch.Tensor) -> torch.Tensor:
     # change right bottom into wh
-    bbox_batch[:,-2:] -= bbox_batch[:,:2]
+    WH = bbox_batch[:,-2:] - bbox_batch[:,:2]
     # move left top to center
-    bbox_batch[:,:2] += bbox_batch[:,-2:]/2
-    
-    return bbox_batch
+    bbox_batch[:,:2] += bbox_batch[:,-2:] / 2
+    XcYc = (bbox_batch[:,-2:] + bbox_batch[:,:2]) / 2
+    XcYcWH = torch.cat([XcYc, WH], dim=1)
+    return XcYcWH
+
+@ltrb_to_xcycwh.register
+def _numpy(bbox_batch: np.ndarray) -> np.ndarray:
+    # change right bottom into wh
+    WH = bbox_batch[:,-2:] - bbox_batch[:,:2]
+    # move left top to center
+    bbox_batch[:,:2] += bbox_batch[:,-2:] / 2
+    XcYc = (bbox_batch[:,-2:] + bbox_batch[:,:2]) / 2
+    XcYcWH = np.concatenate([XcYc, WH], axis=1)
+    return XcYcWH
 
 
 def plot_history(hist, formatable_path:str=None):
@@ -106,7 +137,7 @@ def plot_history(hist, formatable_path:str=None):
     for k in keys:
         v1 = hist[k]
         v2 = hist['val_'+k]
-        
+
         v1 = [v.item() if isinstance(v, torch.Tensor) else v for v in v1]
         v2 = [v.item() if isinstance(v, torch.Tensor) else v for v in v2]
 
@@ -119,7 +150,7 @@ def plot_history(hist, formatable_path:str=None):
         plt.xlabel("Epoch")
         plt.ylabel(k+' value')
         plt.title("History of '{}'".format(k))
-        
+
         if formatable_path is not None:
             path = formatable_path.format(k)
             plt.savefig(path)
