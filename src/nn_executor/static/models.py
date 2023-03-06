@@ -10,7 +10,11 @@ class StaticPruner(PrunerBase):
         self._mask: torch.Tensor = mask
 
     @property
-    def mask(self, mask: torch.Tensor):
+    def mask(self) -> torch.Tensor:
+        return self._mask
+
+    @mask.getter
+    def _(self, mask: torch.Tensor):
         self._mask = mask
 
     def pruning_mask_and_multiplier(self) -> Tuple[torch.Tensor, torch.Tensor]:

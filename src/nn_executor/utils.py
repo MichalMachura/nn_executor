@@ -1,53 +1,13 @@
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Tuple, Union
 import torch
 from torch import nn
 import json
 from nn_executor import models
 import logging
-
-
-@dataclass
-class ModelDescription:
-    layers_indices: List[int] = field(default_factory=list)
-    """Indices of unique modules: position is index of node, value is index of unique module."""
-    unique_layers: List[torch.nn.Module] = field(default_factory=list)
-    """List of unique torch modules."""
-    layers_in_out_channels: List[List[int]] = field(default_factory=list)
-    """Two element list:
-    - first is list of number of channels for each input
-    - second is list of number of channels for each output"""
-    connections: List[Tuple[int, int, int, int]] = field(default_factory=list)
-    """[(src_node_idx, src_node_out_idx, dst_node_idx, dst_node_in_idx),]"""
-    outputs: List[List[int]] = field(default_factory=list)
-    """[(output_node_src_idx, output_node_src_out_idx),]"""
-
-    @staticmethod
-    def make_from_dict(d: Dict[str, Any]):
-        return ModelDescription(**d)
-
-    def __getitem__(self, name: str):
-        if hasattr(self, name):
-            return getattr(self, name)
-        raise AttributeError(f"ModelDescription has no attr named {name}")
-
-    def __setitem__(self, name: str, value:Any):
-        if hasattr(self, name):
-            return setattr(self, name, value)
-        raise AttributeError(f"ModelDescription has no attr named {name}")
-
-    def keys(self):
-        pass
-
-    def values(self):
-        pass
-
-    def items(self):
-        pass
+from nn_executor.model_description import ModelDescription
 
 
 class Logger:
-
     LOG_METHODS = [logging.info]
 
     @staticmethod
@@ -123,7 +83,7 @@ class EvalMode(TrainingMode):
 
 
 def save(filepaths: Union[str, Tuple[str, str]],
-         model_description: Dict[str, Any],
+         model_description: Union[Dict[str, Any], ModelDescription],
          ):
     """
     Save state of executor.
@@ -134,13 +94,14 @@ def save(filepaths: Union[str, Tuple[str, str]],
 
     :param model_description: dict with parsing results
     """
+    model_description = dict(model_description)
     model_description = model_description.copy()
     unique_layers: List[nn.Module] = model_description.pop('unique_layers')
 
     layers_indices: List[int] = model_description.pop('layers_indices')
     layers_in_out_channels = model_description.pop('layers_in_out_channels')
 
-    # assing node indices for each unique layer
+    # assign node indices for each unique layer
     unique_layers_nodes = [[] for u in unique_layers]
     for node_idx, u_idx in enumerate(layers_indices):
         unique_layers_nodes[u_idx].append(node_idx+1)
@@ -159,17 +120,17 @@ def save(filepaths: Union[str, Tuple[str, str]],
     model_description['layers'] = unique_layers_recreators
     model_description['layers_state_dicts'] = unique_layers_state_dicts
 
-    if type(filepaths) is str:
+    if isinstance(filepaths, str):
         torch.save(model_description, filepaths)
 
-    if type(filepaths) is tuple:
+    if isinstance(filepaths, tuple):
         # take off state dicts from dict to prevent saving in json
         state_dicts = model_description.pop('layers_state_dicts')
         # and save it in *.pkl
         torch.save(state_dicts, filepaths[1])
 
         # rest of description save as json
-        with open(filepaths[0], 'w') as f:
+        with open(filepaths[0], 'w', encoding='utf-8') as f:
             json.dump(model_description, f, sort_keys=False, indent=4)
 
 
@@ -195,13 +156,11 @@ def check_format(input_list, pattern):
         return False
 
     for data, ref_type in zip(input_list, pattern):
-        if type(data) is ref_type \
-                or ref_type is list and type(data) is tuple:  # treat tuple as list
+        if isinstance(data, ref_type) \
+                or ref_type is list and isinstance(data, tuple):  # treat tuple as list
             continue
-
         else:
             return False
-
     return True
 
 
@@ -209,7 +168,6 @@ def first_available(indices: List[int]):
     idx = 0
     while idx in indices:
         idx += 1
-
     return idx
 
 
@@ -222,7 +180,6 @@ def indices_availability(new_indices: List[int],
 
 
 def find_src_of_dst(connections, dst_idx, dst_in_idx):
-
     for (user_src_idx, user_src_out_idx, user_dst_idx, user_dst_in_idx) in connections:
         if user_dst_idx == dst_idx and user_dst_in_idx == dst_in_idx:
             return (user_src_idx, user_src_out_idx, user_dst_idx, user_dst_in_idx)
@@ -233,26 +190,21 @@ def find_src_of_dst(connections, dst_idx, dst_in_idx):
 def load(file_paths: Union[str, Tuple[str, str]],
          map_location=None,
          strict=True,
-         command_transformer=import_module_of_class) -> Tuple[
-    Dict[str, Any],
-    Dict[str, Any]
-]:
-    if type(file_paths) is str:
+         command_transformer=import_module_of_class) -> ModelDescription:
+    if isinstance(file_paths, str):
         model_description: Dict = torch.load(
             file_paths, map_location=map_location)
     else:
-        f = open(file_paths[0], 'r')
-        model_description: Dict = json.load(f)
-        f.close()
+        with open(file_paths[0], 'r', encoding='utf-8') as f:
+            model_description: Dict = json.load(f)
 
         if len(file_paths) > 1:
             try:
                 model_description['layers_state_dicts'] = torch.load(
                     file_paths[1], map_location=map_location)
-            except:
+            except Exception as _:
                 log_print("Problem with opening file", file_paths[1])
                 log_print("State dicts not loaded!!!")
-                pass
 
     layers_description = model_description.pop('layers')
     layers_state_dicts = model_description.pop('layers_state_dicts',
@@ -275,7 +227,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
 
         # non list -> list with one element
         # module.layer
-        if type(layer_desc) is not list:
+        if not isinstance(layer_desc, list):
             layer_desc = [layer_desc]
 
         # parsing depends on format
@@ -478,8 +430,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
             outputs.append((src_idx, src_out_idx, dst_in_idx))
 
     model_description['outputs'] = outputs
-
-    return model_description
+    return ModelDescription(**model_description)
 
     # return {'layers_indices':layers_indices,
     #         'unique_layers':unique_layers,
