@@ -23,7 +23,7 @@ class StaticModifier(modifiers.Modifier):
                         ):
         original_shape = weights.shape
         weights = weights.reshape(original_shape[0],-1)
-        weights = self._norm(x, offset=bias)
+        weights = self._norm(weights, offset=bias)
 
         # correlation matrix
         corr = torch.matmul(weights, weights.transpose(0, 1))

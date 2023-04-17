@@ -87,7 +87,7 @@
     "python.linting.pylintEnabled": true,
     "python.terminal.activateEnvInCurrentTerminal": true,
     "python.terminal.activateEnvironment": true,
-    "python.condaPath": "nn_executor_venv",
+    // "python.condaPath": "nn_executor_venv",
     "python.testing.autoTestDiscoverOnSaveEnabled": true,
     "python.testing.cwd": "${workspaceFolder}/src",
     "python.testing.pytestEnabled": false,
@@ -95,11 +95,11 @@
         "-v",
         "--locals",
         "-t",
-        "${workspaceFolder}/src",
+        "${workspaceFolder}/tests",
         "-s",
         "${workspaceFolder}/tests",
         "-p",
-        "*test_*.py"
+        "test_*.py"
     ],
     "python.testing.unittestEnabled": true,
     "pythonIndent.keepHangingBracketOnLine": true,
