@@ -1,9 +1,9 @@
+import json
+import logging
 from typing import Any, Dict, List, Tuple, Union
 import torch
 from torch import nn
-import json
 from nn_executor import models
-import logging
 from nn_executor.model_description import ModelDescription
 
 
@@ -39,7 +39,7 @@ def get_number_of_params(model: torch.nn.Module):
 
 def print_state_dict(state_dict, print_values=False):
     for i, (k, v) in enumerate(state_dict.items()):
-        print("{}: {} -> {}".format(i, k, v if print_values else v.shape))
+        print(f"{i}: {k} -> {v if print_values else v.shape}")
 
 
 def between_all(op, L: List):
@@ -104,7 +104,7 @@ def save(filepaths: Union[str, Tuple[str, str]],
     # assign node indices for each unique layer
     unique_layers_nodes = [[] for u in unique_layers]
     for node_idx, u_idx in enumerate(layers_indices):
-        unique_layers_nodes[u_idx].append(node_idx+1)
+        unique_layers_nodes[u_idx].append(node_idx + 1)
 
     # assign in/out channels to unique rather than every node
     unique_layers_in_out = [([], []) for q in unique_layers]
@@ -112,7 +112,7 @@ def save(filepaths: Union[str, Tuple[str, str]],
                               layers_in_out_channels):
         unique_layers_in_out[idx] = in_out_ch
 
-    unique_layers_recreators = [[nodes, str(L.__class__.__module__)+'.'+str(L), in_out_ch]
+    unique_layers_recreators = [[nodes, f"{L.__class__.__module__}.{L}", in_out_ch]
                                 for L, in_out_ch, nodes in zip(unique_layers,
                                                                unique_layers_in_out,
                                                                unique_layers_nodes)]
@@ -146,7 +146,7 @@ def split_module_class(module_class_call: str):
     split_pos = module_class.rfind('.')
     # extract
     module_name = module_class_call[:split_pos]
-    layer_class = module_class_call[split_pos+1:]
+    layer_class = module_class_call[split_pos + 1:]
 
     return module_name, layer_class
 
@@ -159,8 +159,7 @@ def check_format(input_list, pattern):
         if isinstance(data, ref_type) \
                 or ref_type is list and isinstance(data, tuple):  # treat tuple as list
             continue
-        else:
-            return False
+        return False
     return True
 
 
@@ -350,7 +349,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
     indices = []
     for u_idx, nodes in enumerate(nodes_indices):
         for node_idx in nodes:
-            indices.append((node_idx-1, u_idx))
+            indices.append((node_idx - 1, u_idx))
 
     layers_indices = sorted(indices, key=lambda x: x[0])
     layers_indices = [idx[1] for idx in layers_indices]
@@ -395,7 +394,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
                     if connection_established:
                         break
                     # to true src layer index
-                    src_idx = dst_idx-1-non_pos_src_idx
+                    src_idx = dst_idx - 1 - non_pos_src_idx
                     # for each src output
                     for src_out_idx, ch_out in enumerate(channels_of_outputs):
                         # criterion can be only channels -- whole shape is unknown and can depends on input shape
@@ -414,7 +413,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
 
         # extend user connections
         connections.extend(auto_connections)
-        connections = sorted(connections, key=lambda x: 10*x[2]+x[3])
+        connections = sorted(connections, key=lambda x: 10 * x[2] + x[3])
 
     # update connections
     model_description['connections'] = connections

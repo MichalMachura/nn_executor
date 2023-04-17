@@ -1,19 +1,9 @@
 from typing import List, Tuple, Type, Union
 from warnings import warn
 import torch
-import torch.nn as nn
+from torch import nn
 from nn_executor import models, utils
-
-
-FORWARD_TYPE = Tuple[torch.Tensor,  # mask
-                     Union[torch.Tensor,  # backwarded multiplier if cannot be applied on previous node
-                           None],
-                     Union[torch.Tensor,  # bias, if node input is deleted
-                           None],
-                     ]  # (bool mask, mul or None, bias or None)
-BACKWARD_TYPE = Tuple[torch.Tensor,  # mask
-                      torch.Tensor,  # multiplier
-                      ]  # (bool mask, multiplier)
+from nn_executor.types import FORWARD_TYPE, BACKWARD_TYPE
 
 
 class Modifier:
@@ -51,21 +41,18 @@ class Modifier:
 
 
 class Conv2dModifier(Modifier):
-    def __init__(self) -> None:
-        super().__init__()
 
-    def clone(self, module: nn.Conv2d) -> nn.Module:
-        m = nn.Conv2d(module.in_channels,
-                      module.out_channels,
-                      module.kernel_size,
-                      module.stride,
-                      module.padding,
-                      module.dilation,
-                      module.groups,
-                      module.bias is not None,
-                      module.padding_mode)
-        m.load_state_dict(module.state_dict())
-
+    def clone(self, in_module: nn.Conv2d) -> nn.Module:
+        m = nn.Conv2d(in_module.in_channels,
+                      in_module.out_channels,
+                      in_module.kernel_size,
+                      in_module.stride,
+                      in_module.padding,
+                      in_module.dilation,
+                      in_module.groups,
+                      in_module.bias is not None,
+                      in_module.padding_mode)
+        m.load_state_dict(in_module.state_dict())
         return m
 
     def forward(self,
@@ -95,7 +82,7 @@ class Conv2dModifier(Modifier):
         if ch_in > 0:
             # input is const
             if in_bias is not None:
-                bias = W*in_bias.reshape(1, -1, 1, 1)
+                bias = W * in_bias.reshape(1, -1, 1, 1)
                 bias = bias.sum(dim=(1, 2, 3)).flatten()
                 # add bias of this conv
                 if BIAS is not None:
@@ -104,37 +91,36 @@ class Conv2dModifier(Modifier):
                 return None, [(out_mask, None, bias)]
 
             # input has some variability
-            else:
-                m = nn.Conv2d(ch_in,
-                              ch_out,
-                              in_module.kernel_size,
-                              in_module.stride,
-                              in_module.padding,
-                              in_module.dilation,
-                              in_module.groups,
-                              in_module.bias is not None,
-                              in_module.padding_mode)
+            m = nn.Conv2d(ch_in,
+                          ch_out,
+                          in_module.kernel_size,
+                          in_module.stride,
+                          in_module.padding,
+                          in_module.dilation,
+                          in_module.groups,
+                          in_module.bias is not None,
+                          in_module.padding_mode)
 
-                with torch.no_grad():
-                    # fuse with in mul
-                    if in_mul is not None:
-                        W = W * in_mul.reshape(1, -1, 1, 1)
-                    # apply masks
-                    W = W[out_mask, :, :, :][:, in_mask, :, :]
-                    m.weight[:] = W
+            with torch.no_grad():
+                # fuse with in mul
+                if in_mul is not None:
+                    W = W * in_mul.reshape(1, -1, 1, 1)
+                # apply masks
+                W = W[out_mask, :, :, :][:, in_mask, :, :]
+                m.weight[:] = W
 
-                    if BIAS is not None:
-                        m.bias[:] = BIAS[out_mask]
+                if BIAS is not None:
+                    m.bias[:] = BIAS[out_mask]
 
-                return m, [(out_mask, out_mul, None)]
+            return m, [(out_mask, out_mul, None)]
 
         # no input
-        else:
-            if BIAS is not None:
-                return None, [(out_mask, None, BIAS)]
-            else:
-                # module output is none -> zeroing mask
-                return None, [(torch.zeros_like(out_mask), None, None)]
+
+        if BIAS is not None:
+            return None, [(out_mask, None, BIAS)]
+
+        # module output is none -> zeroing mask
+        return None, [(torch.zeros_like(out_mask), None, None)]
 
     def backward(self,
                  in_module: nn.Conv2d,
@@ -150,7 +136,7 @@ class Conv2dModifier(Modifier):
         with torch.no_grad():
             m.weight[:] = in_module.weight * multiplier.reshape(-1, 1, 1, 1)
             if in_module.bias is not None:
-                m.bias[:] = (in_module.bias*multiplier)
+                m.bias[:] = (in_module.bias * multiplier)
 
         if ch_out > 0:
             in_mask = torch.ones(in_module.in_channels, dtype=torch.bool)
@@ -165,8 +151,6 @@ class Conv2dModifier(Modifier):
 
 
 class BatchNorm2dModifier(Modifier):
-    def __init__(self) -> None:
-        super().__init__()
 
     def clone(self, in_module: nn.BatchNorm2d) -> nn.Module:
         m = nn.BatchNorm2d(in_module.num_features,
@@ -541,8 +525,7 @@ class AddModifier(ElementwiseModifier):
                     biases.append(in_bias)
                     continue
                 # variable input
-                else:
-                    masks.append(in_mask)
+                masks.append(in_mask)
 
         BIAS = sum(biases) if biases else None
 
@@ -553,33 +536,30 @@ class AddModifier(ElementwiseModifier):
 
             return None, [(out_mask, None, BIAS),]
 
-        else:
-            mask = utils.between_all(torch.logical_and, masks)
-            mask_or = utils.between_all(torch.logical_or, masks)
-            ch = mask.sum().item()
-            xor = mask != mask_or
-            ch_xor = xor.sum().item()
+        mask = utils.between_all(torch.logical_and, masks)
+        mask_or = utils.between_all(torch.logical_or, masks)
+        ch = mask.sum().item()
+        xor = mask != mask_or
+        ch_xor = xor.sum().item()
 
-            if ch_xor > 0:
-                raise RuntimeError("Input masks are different")
+        if ch_xor > 0:
+            raise RuntimeError("Input masks are different")
 
-            if ch != ch_out:
-                Warning(
-                    f"Inputs masks channels:{ch} is different from output mask:{ch_out}.")
+        if ch != ch_out:
+            warn(f"Inputs masks channels:{ch} is different from output mask:{ch_out}.")
 
-            if ch < ch_out:
-                Warning(
-                    f"Outputs masks channels:{ch_out} is reduced to:{ch} channels.")
+        if ch < ch_out:
+            warn(f"Outputs masks channels:{ch_out} is reduced to:{ch} channels.")
 
-            # adder with input for bias
-            m = models.Add(len(masks)+int(BIAS is not None))
+        # adder with input for bias
+        m = models.Add(len(masks)+int(BIAS is not None))
 
-            if BIAS is not None:
-                b = models.Variable(BIAS[mask].reshape(1, -1, 1, 1))
-                m = models.ModuleWithConstArgs(m)
-                m.add(0, b)
+        if BIAS is not None:
+            b = models.Variable(BIAS[mask].reshape(1, -1, 1, 1))
+            m = models.ModuleWithConstArgs(m)
+            m.add(0, b)
 
-            return m, [(mask, None, None),]
+        return m, [(mask, None, None),]
 
 
 # TODO -> needs different flow
@@ -609,9 +589,6 @@ class MulModifier(ElementwiseModifier):
 
         muls = []
         masks = [out_mask]
-        if in_mul is not None:
-            muls.append(in_mul)
-
         for i, (in_mask, in_mul, in_bias) in enumerate(in_mask_mul_bias):
             masks.append(in_mask)
 
@@ -637,16 +614,15 @@ class MulModifier(ElementwiseModifier):
         if CH == 0:
             return None, [(out_mask, None, None),]
 
-        else:
-            num_of_muls = len(in_mask_mul_bias) + int(MUL is not None)
-            m = models.Mul(num_of_muls)
+        num_of_muls = len(in_mask_mul_bias) + int(MUL is not None)
+        m = models.Mul(num_of_muls)
 
-            if MUL is not None:
-                b = models.Variable(MUL.reshape(1, -1, 1, 1))
-                m = models.ModuleWithConstArgs(m)
-                m.add(0, b)
+        if MUL is not None:
+            b = models.Variable(MUL.reshape(1, -1, 1, 1))
+            m = models.ModuleWithConstArgs(m)
+            m.add(0, b)
 
-            return m, [(MASK, None, None),]
+        return m, [(MASK, None, None),]
 
     def backward(self,
                  in_module: models.Mul,
@@ -664,9 +640,8 @@ class MulModifier(ElementwiseModifier):
             root = torch.pow(mul, exponent)
             return m, [(mask, root) for i in range(in_module.num)], [(mask, None),]
 
-        else:
-            # tensors of ones are backpopagated to inputs, mul is stored for applying after (MultiWithConst)
-            return m, [(mask, torch.ones_like(mul)) for i in range(in_module.num)], [(mask, mul),]
+        # tensors of ones are backpopagated to inputs, mul is stored for applying after (MultiWithConst)
+        return m, [(mask, torch.ones_like(mul)) for i in range(in_module.num)], [(mask, mul),]
 
 
 class CatModifier(Modifier):
@@ -752,11 +727,11 @@ class CatModifier(Modifier):
             return m, [(MASK, MUL, None),]
 
         # full input is bias
-        elif len(valid_biases) == len(valid_shapes):
+        if len(valid_biases) == len(valid_shapes):
             return None, [(MASK, None, BIAS),]
 
         # some inputs are biases -> Cat + Variable
-        elif len(valid_biases) < len(valid_shapes):
+        if len(valid_biases) < len(valid_shapes):
             # with this module can integrate bias,
             # so out mul can be available
             if muls_cntr == 0:
@@ -927,19 +902,17 @@ class PrunerModifier(Modifier):
             if in_bias is not None:
                 return None, [(in_mask, None, in_bias),]
             # input is variable
+            if not self.replace_with_identity:
+                m = self.clone(in_module)
+                with torch.no_grad():
+                    # set multipliers to 1
+                    m.init_ones()
             else:
-                if not self.replace_with_identity:
-                    m = self.clone(in_module)
-                    with torch.no_grad():
-                        # set multipliers to 1
-                        m.init_ones()
-                else:
-                    m = models.Identity()
-                return m, [(in_mask, in_mul, None),]
+                m = models.Identity()
+            return m, [(in_mask, in_mul, None),]
         # no input
-        else:
-            # output is bias of this module
-            return None, [(in_mask, None, None)]
+        # output is bias of this module
+        return None, [(in_mask, None, None)]
 
     def backward(self,
                  in_module: models.Pruner,

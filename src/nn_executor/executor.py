@@ -32,7 +32,7 @@ class Node:
     def set_input(self, idx: int, x: torch.Tensor) -> 'Node':
         if idx >= len(self.inputs_values):
             raise RuntimeError(
-                "idx =", idx, "is over last available idx =", len(self.inputs_values)-1)
+                "idx =", idx, "is over last available idx =", len(self.inputs_values) - 1)
 
         # set proper input
         self.inputs_values[idx] = x
@@ -41,8 +41,8 @@ class Node:
 
         if self.is_active:
             return self
-        else:
-            return None
+
+        return None
 
     @property
     def is_active(self):
@@ -96,9 +96,9 @@ class OutputNode(Node):
         super().__init__(layer, (num_of_outputs, num_of_outputs), node_idx)
 
     def set_input(self, idx: int, x) -> 'Node':
-        is_active = super().set_input(idx, x)
+        _ = super().set_input(idx, x)
         # always return None -- prevent execution as basic node
-        return None
+        # return None
 
     def __call__(self):
         # get buffered values
@@ -110,11 +110,10 @@ class OutputNode(Node):
         if len(values) == 0:
             return None
 
-        elif len(values) == 1:
+        if len(values) == 1:
             return values[0]
 
-        else:
-            return values
+        return values
 
 
 class Executor(nn.Module):
@@ -156,13 +155,13 @@ class Executor(nn.Module):
                         unique_layers: List[nn.Module]):
         for i, L in enumerate(unique_layers):
             cls = L.__class__.__name__
-            self.add_module("layer_{:03}_type_{}".format(i, cls), L)
+            self.add_module(f"layer_{i:03}_type_{cls}", L)
 
     def update_connections(self,
                            layers_indices: List[int],
                            connections: List[Tuple[int, int, int, int]],
                            outputs: List[Tuple[int, int, int]]):
-        dst = len(layers_indices)+1
+        dst = len(layers_indices) + 1
         for src, src_out_idx, dst_in_idx in outputs:
             link = (src, src_out_idx, dst, dst_in_idx)
             connections.append(link)
@@ -174,7 +173,7 @@ class Executor(nn.Module):
             if src == 0:
                 noi = max(noi, src_out_idx)
 
-        return noi+1
+        return noi + 1
 
     def create_nodes(self,
                      layers_indices: List[int],
@@ -189,13 +188,13 @@ class Executor(nn.Module):
         nodes = []
         for i, (layer_idx, degree) in enumerate(zip(layers_indices, layers_degree)):
             L = unique_layers[layer_idx]
-            nodes.append(Node(L, degree=degree, node_idx=i+1))
+            nodes.append(Node(L, degree=degree, node_idx=i + 1))
 
         inL, outL = models.Identity(), models.Identity()
 
         nodes = [InputNode(inL, noi),
                  *nodes,
-                 OutputNode(outL, noo, len(nodes)+1)]
+                 OutputNode(outL, noo, len(nodes) + 1)]
 
         return nodes
 
@@ -209,7 +208,7 @@ class Executor(nn.Module):
 
     def forward(self, *args):
         for i, x in enumerate(args):
-            a = self.nodes[0].set_input(i, x)
+            _ = self.nodes[0].set_input(i, x)
 
         if not self.nodes[0].is_active:
             raise RuntimeError("First node has not been activated.")

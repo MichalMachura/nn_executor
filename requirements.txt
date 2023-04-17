@@ -1,2 +1,5 @@
 torch
 json5
+numpy
+matplotlib
+opencv-python

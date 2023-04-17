@@ -1,4 +1,3 @@
-from crypt import methods
 from functools import singledispatch
 import numpy as np
 import cv2 as cv

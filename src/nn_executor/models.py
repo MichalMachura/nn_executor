@@ -9,8 +9,6 @@ DIFFERENTIATE_TENSOR = False
 
 
 class Identity(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
 
     def forward(self, *args):
         if DIFFERENTIATE_TENSOR:
@@ -19,11 +17,10 @@ class Identity(nn.Module):
         if len(args) == 0:
             return None
 
-        elif len(args) == 1:
+        if len(args) == 1:
             return args[0]
 
-        else:
-            return args
+        return args
 
 
 class Upsample(nn.Upsample):
@@ -37,7 +34,8 @@ class Upsample(nn.Upsample):
         super().__init__(size, scale_factor, mode, align_corners)
 
     def extra_repr(self) -> str:
-        s = f"size={self.size}, scale_factor={self.scale_factor}, mode='{self.mode}', align_corners={self.align_corners}"
+        s = f"size={self.size}, scale_factor={self.scale_factor}, " \
+            + f"mode='{self.mode}', align_corners={self.align_corners}"
         return s
 
 
@@ -51,10 +49,8 @@ class Constant(nn.Module):
         super().__init__()
         self.t = torch.nn.Parameter(t, requires_grad=False)
 
-    def __repr__(
-        self,
-    ):
-        return f"Constant(t=torch.zeros({tuple(self.t.shape)},dtype={self.t.dtype}))"
+    def __repr__(self, ) -> str:
+        return f"Constant(t=torch.zeros({tuple(self.t.shape)}, dtype={self.t.dtype}))"
 
     def forward(self):
         return torch.cat([self.t] * CONSTANTS.BATCH_DIM_CAT_VAR_CONST, dim=0)
@@ -68,10 +64,8 @@ class Variable(Constant):
         super().__init__(t)
         self.t.requires_grad = True
 
-    def __repr__(
-        self,
-    ):
-        return f"Variable(t=torch.zeros({tuple(self.t.shape)},dtype={self.t.dtype}))"
+    def __repr__(self) -> str:
+        return f"Variable(t=torch.zeros({tuple(self.t.shape)}, dtype={self.t.dtype}))"
 
 
 class Elementwise(nn.Module):
@@ -81,7 +75,7 @@ class Elementwise(nn.Module):
         self.num = num
 
     def extra_repr(self) -> str:
-        return "num=%i" % self.num
+        return f"num={self.num}"
 
     def forward(self, *args):
         x = args[0]
@@ -127,27 +121,21 @@ class WithBatchNorm2d(nn.Module):
 
 class ModuleWithConstArgs(nn.Module):
     def __init__(
-        self, module: nn.Module, modules: List[Tuple[torch.nn.Module, int]] = []
+        self, module: nn.Module, modules: List[Tuple[torch.nn.Module, int]] = None
     ) -> None:
         super().__init__()
         self.module: nn.Module = module
-        self.params_pos: List[
-            Tuple[torch.nn.Module, int]
-        ] = []  # Constants or Variables modules
-        for mp in modules:
-            self.add(mp[1], mp[0])
+        self.params_pos: List[Tuple[torch.nn.Module, int]] = []  # Constants or Variables modules
+
+        if modules is not None:
+            for mp in modules:
+                self.add(mp[1], mp[0])
 
     def __repr__(self):
-        L = [(m, p) for m, p in self.params_pos]
-        s = f"{self.__class__.__name__}(module={self.module}, modules={L})"
-
+        s = f"{self.__class__.__name__}(module={self.module}, modules={self.params_pos})"
         return s
 
-    def add(
-        self,
-        pos: int,
-        module: nn.Module,
-    ):
+    def add(self, pos: int, module: nn.Module):
         with torch.no_grad():
             self.add_module(f"const_input_at_pos_{pos}", module)
             self.params_pos.append((module, pos))
@@ -179,16 +167,16 @@ class ModuleWithConstArgs(nn.Module):
 
 
 class Cat(nn.Module):
-    def __init__(self, dim=1) -> None:
+    def __init__(self, dim: int = 1) -> None:
         super().__init__()
-        self.dim: int = 1
+        self.dim: int = dim
         self.input_shapes: List[Tuple] = []
         self.output_shape: Tuple = ()
 
     def extra_repr(self) -> str:
         return f"dim={self.dim}"
 
-    def forward(self, *x: torch.Tensor):
+    def forward(self, *x: torch.Tensor) -> torch.Tensor:
         self.input_shapes = [t.shape for t in x]
 
         x = torch.cat(x, dim=self.dim)
@@ -198,9 +186,9 @@ class Cat(nn.Module):
 
 
 class ChannelsLogger(torch.nn.Module):
-    def __init__(self, channels: List[int] = []) -> None:
+    def __init__(self, channels: List[int] = None) -> None:
         super().__init__()
-        self.channels: List[int] = channels
+        self.channels: List[int] = channels if channels is not None else []
 
     def extra_repr(self) -> str:
         return f"channels={self.channels}"
@@ -212,13 +200,11 @@ class ChannelsLogger(torch.nn.Module):
 
 
 class OutputLayer(ChannelsLogger):
-    def __init__(self, channels: List[int] = []) -> None:
-        super().__init__(channels)
+    pass
 
 
 class InputLayer(ChannelsLogger):
-    def __init__(self, channels: List[int] = []) -> None:
-        super().__init__(channels)
+    pass
 
 
 def sigmoid(x: torch.Tensor, a: torch.Tensor, b: torch.Tensor):
@@ -241,18 +227,16 @@ class Pruner(PrunerBase):
         self.activated = activated
         self.prunable = prunable
         self.num_of_appearances = num_of_appearances
-        self.pruner_weight = torch.nn.Parameter(
-            torch.ones((1, self.ch, 1, 1), dtype=torch.float32) *
-            1.0000008344650269,
-            requires_grad=activated,
-        )
+        self.pruner_weight = torch.nn.Parameter(torch.ones((1, self.ch, 1, 1),
+                                                           dtype=torch.float32) * 1.0000008344650269,
+                                                requires_grad=activated)
         self.init_ones()
         if activated:
             self.adjustment_mode()
 
     def extra_repr(self) -> str:
-        s = ""
-        s += f"ch={self.ch}, prunable={self.prunable}, activated={self.activated}, threshold={self.threshold}, num_of_appearances={self.num_of_appearances}"
+        s = f"ch={self.ch}, prunable={self.prunable}, activated={self.activated}, " \
+            + "threshold={self.threshold}, num_of_appearances={self.num_of_appearances}"
         return s
 
     def pruning_mask_and_multiplier(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -273,12 +257,9 @@ class Pruner(PrunerBase):
     def adjustment_mode(self):
         with torch.no_grad():
             device = self.pruner_weight.device
-            self.pruner_weight[:] = (
-                1
-                - torch.rand((1, self.ch, 1, 1),
-                             dtype=torch.float32, device=device)
-                * 0.01
-            )
+            self.pruner_weight[:] = (1 - 0.01 * torch.rand((1, self.ch, 1, 1),
+                                                           dtype=torch.float32,
+                                                           device=device))
         self.pruner_weight.requires_grad = True
 
     def init_ones(self):
@@ -289,48 +270,39 @@ class Pruner(PrunerBase):
         if not self.activated:
             # cloning for differentiate input and output tensor
             return x.clone() if DIFFERENTIATE_TENSOR else x
-        else:
-            s = sigmoid(self.pruner_weight, 100, 86)
-            # x = x * (s * self.pruner_weight**2)
-            m = s * self.pruner_weight
-            with torch.no_grad():
-                mask = (self.pruner_weight > self.threshold).to(torch.float32)
-            # hard off
-            m = mask * m
-            # select channels by multiplication
-            x = x * m
+
+        s = sigmoid(self.pruner_weight, 100, 86)
+        # x = x * (s * self.pruner_weight**2)
+        m = s * self.pruner_weight
+        with torch.no_grad():
+            mask = (self.pruner_weight > self.threshold).to(torch.float32)
+        # hard off
+        m = mask * m
+        # select channels by multiplication
+        x = x * m
 
         return x
 
 
 class AllOrNothingPruner(Pruner):
-    def __init__(
-        self,
-        ch: int,
-        prunable: bool = False,
-        activated: bool = True,
-        threshold: float = 0.75,
-        num_of_appearances: int = 1,
-    ) -> None:
-        super().__init__(ch, prunable, activated, threshold, num_of_appearances)
 
     def forward(self, x):
         if not self.activated:
             # cloning for differentiate input and output tensor
             return x.clone() if DIFFERENTIATE_TENSOR else x
-        else:
-            mean = self.pruner_weight.mean()
-            s = sigmoid(mean, 100, 86)
-            m = s * self.pruner_weight
 
-            with torch.no_grad():
-                mask = (mean > self.threshold).to(torch.float32)
-                mask = torch.ones_like(self.pruner_weight) * mask
+        mean = self.pruner_weight.mean()
+        s = sigmoid(mean, 100, 86)
+        m = s * self.pruner_weight
 
-            # hard off
-            m = mask * m
-            # select channels by multiplication
-            x = x * m
+        with torch.no_grad():
+            mask = (mean > self.threshold).to(torch.float32)
+            mask = torch.ones_like(self.pruner_weight) * mask
+
+        # hard off
+        m = mask * m
+        # select channels by multiplication
+        x = x * m
 
         return x
 

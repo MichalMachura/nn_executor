@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import List, Dict, Tuple, Any
 import torch
 
@@ -37,14 +37,16 @@ class ModelDescription:
 
     # mapping to dict
     def __iter__(self):
-        return self.__dataclass_fields__
+        return iter(fields(self))
 
     def keys(self):
-        self.__dataclass_fields__
-        return self.__dataclass_fields__.keys()
+        keys = [f.name for f in fields(self)]
+        return keys
 
     def values(self):
-        return self.__dataclass_fields__.values()
+        values = [self[f.name] for f in fields(self)]
+        return values
 
     def items(self):
-        return self.__dataclass_fields__.items()
+        items = [(f.name, self[f.name]) for f in fields(self)]
+        return items

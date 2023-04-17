@@ -1,32 +1,11 @@
 {
-    "python.testing.unittestArgs": [
-        "-v",
-        "-s",
-        "./tests",
-        "-p",
-        "test_*.py"
-    ],
-    "python.testing.pytestEnabled": false,
-    "python.testing.unittestEnabled": true,
-    "python.linting.pylintArgs": [
-        "--generated-members=numpy.* ,torch.*"
-        ],
-    "python.defaultInterpreterPath": "/Users/michalmachura/opt/anaconda3/envs/bridge_env/bin/python",
-    "python.analysis.extraPaths": [
-        "${workspaceFolder}",
-        "${workspaceFolder}/src"
-    ],
-    "python.autoComplete.extraPaths": [
-        "${workspaceFolder}",
-        "${workspaceFolder}/src"
-    ],
-    "python.linting.pylintEnabled": true,
-    "python.linting.pycodestyleEnabled": true,
-    "python.linting.enabled": true,
-    "python.analysis.completeFunctionParens": false,
-    "python.analysis.inlayHints.functionReturnTypes": true,
-    "python.analysis.inlayHints.variableTypes": false,
-    "pylint.importStrategy": "fromEnvironment",
+    "editor.detectIndentation": false,
+    "editor.insertSpaces": true,
+    "editor.lightbulb.enabled": true,
+    "editor.renderWhitespace": "all",
+    "editor.tabSize": 4,
+    "git.ignoreLimitWarning": true,
+    "jupyter.debugJustMyCode": false,
     "pylint.args": [
         "--jobs=3",
         "--disable=C0114", // docsrings
@@ -43,6 +22,7 @@
         // "--disable=E0611",
         "--disable=R0913", //too-many-arguments
         // "--disable=W1202",
+        "--disable=R1702", // too-many-nested-blocks
         "--disable=W1203", //logging-fstring-interpolation
         // "--disable=R1705",
         "--disable=W0221", // arguments-differ
@@ -52,62 +32,95 @@
         "--max-line-length=120",
         // "--extension-pkg-allow-list=cv2",
         "--generated-members=torch.*, skimage.*"
-      ],
-    "python.languageServer": "Pylance",
-    "python.analysis.importFormat": "absolute",
-    "python.linting.lintOnSave": true,
-    "python.linting.pydocstyleEnabled": false,
-    "python.analysis.diagnosticMode": "workspace",
-    "editor.tabSize": 4,
-    "editor.renderWhitespace": "all",
-    "editor.detectIndentation":false,
-    "editor.insertSpaces": true,
-    "python.testing.cwd": "${workspaceFolder}",
-    "[python]": {
-        "editor.rulers": [
-            {"column":120, "color": "#e8131380"},
-            {"column":100, "color": "#621b1b80"},
-            {"column":79, "color": "#2e0e0e80"},
-        ],
-        "editor.defaultFormatter": "ms-python.python",
-        "editor.formatOnSave": false
-    },
-    "python.analysis.typeCheckingMode": "off",
-    "python.linting.cwd": "${workspaceFolder}",
-    "python.testing.autoTestDiscoverOnSaveEnabled": true,
-    "python.linting.pycodestyleCategorySeverity.W": "Warning",
-    "python.linting.pycodestyleCategorySeverity.E": "Error",
-    "python.linting.pycodestyleArgs": [
-        "--max-line-length=120",
-        "--ignore=E0213"
     ],
-    "python.analysis.autoSearchPaths": true,
-    "python.analysis.autoImportCompletions": true,
-    "python.analysis.useLibraryCodeForTypes": true,
-    "python.analysis.indexing": true,
-    "editor.lightbulb.enabled": true,
+    "pylint.importStrategy": "fromEnvironment",
+    "pylint.interpreter": [
+        "/Users/michalmachura/opt/anaconda3/envs/nn_executor_venv/bin/python"
+    ],
+    "pylint.logLevel": "warn",
     "pylint.severity": {
         "convention": "Warning",
         "refactor": "Warning",
         "info": "Hint"
     },
-    "python.linting.maxNumberOfProblems": 50,
-    "python.linting.mypyArgs": [],
-    "pylint.logLevel": "warn",
-    "pylint.interpreter": [
-        "/Users/michalmachura/opt/anaconda3/envs/bridge_env/bin/python"
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.autoSearchPaths": true,
+    "python.analysis.completeFunctionParens": false,
+    "python.analysis.diagnosticMode": "workspace",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/src",
     ],
-    "terminal.integrated.defaultProfile.osx": "zsh",
-    "terminal.integrated.env.osx": {
-    },
-    "python.terminal.activateEnvInCurrentTerminal": true,
-    "python.terminal.activateEnvironment": true,
-    "jupyter.debugJustMyCode": false,
-    "pythonIndent.keepHangingBracketOnLine": true,
-    "python.formatting.provider": "autopep8",
+    "python.analysis.importFormat": "absolute",
+    "python.analysis.indexing": true,
+    "python.analysis.inlayHints.functionReturnTypes": true,
+    "python.analysis.inlayHints.variableTypes": false,
+    "python.analysis.typeCheckingMode": "off",
+    "python.analysis.useLibraryCodeForTypes": true,
+    "python.autoComplete.extraPaths": [
+        "${workspaceFolder}",
+        "${workspaceFolder}/src"
+    ],
+    "python.defaultInterpreterPath": "/Users/michalmachura/opt/anaconda3/envs/nn_executor_venv/bin/python",
     "python.formatting.autopep8Args": [
         "--max-line-length=200",
         "--select=E,W"
-    ]
-
+    ],
+    "python.formatting.provider": "autopep8",
+    "python.languageServer": "Pylance",
+    "python.linting.cwd": "${workspaceFolder}/src",
+    "python.linting.enabled": true,
+    "python.linting.lintOnSave": true,
+    "python.linting.maxNumberOfProblems": 50,
+    "python.linting.mypyArgs": [],
+    "python.linting.pycodestyleArgs": [
+        "--max-line-length=120",
+        "--ignore=E0213"
+    ],
+    "python.linting.pycodestyleCategorySeverity.E": "Error",
+    "python.linting.pycodestyleCategorySeverity.W": "Warning",
+    "python.linting.pycodestyleEnabled": false,
+    "python.linting.pydocstyleEnabled": false,
+    "python.linting.pylintArgs": [
+        "--generated-members=numpy.* ,torch.*"
+    ],
+    "python.linting.pylintEnabled": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "python.terminal.activateEnvironment": true,
+    "python.condaPath": "nn_executor_venv",
+    "python.testing.autoTestDiscoverOnSaveEnabled": true,
+    "python.testing.cwd": "${workspaceFolder}/src",
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestArgs": [
+        "-v",
+        "--locals",
+        "-t",
+        "${workspaceFolder}/src",
+        "-s",
+        "${workspaceFolder}/tests",
+        "-p",
+        "*test_*.py"
+    ],
+    "python.testing.unittestEnabled": true,
+    "pythonIndent.keepHangingBracketOnLine": true,
+    "terminal.integrated.defaultProfile.osx": "zsh",
+    "terminal.integrated.env.osx": {},
+    "[python]": {
+        "editor.rulers": [
+            {
+                "column": 120,
+                "color": "#e8131380"
+            },
+            {
+                "column": 100,
+                "color": "#621b1b80"
+            },
+            {
+                "column": 79,
+                "color": "#2e0e0e80"
+            }
+        ],
+        "editor.defaultFormatter": "ms-python.python",
+        "editor.formatOnSave": false
+    }
 }

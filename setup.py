@@ -2,10 +2,8 @@ from setuptools import setup
 
 
 if __name__ == '__main__':
-    packages = [
-                "torch",
-                "json5",
-                ]
+    with open("requirements.txt", 'r') as f:
+        packages = f.readlines()
 
     setup(name='nn_executor',
           version='0.1.1',
