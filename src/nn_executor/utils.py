@@ -82,22 +82,12 @@ class EvalMode(TrainingMode):
         super().__init__(model, False)
 
 
-def save(filepaths: Union[str, Tuple[str, str]],
-         model_description: Union[Dict[str, Any], ModelDescription],
-         ):
-    """
-    Save state of executor.
+def model_description_to_storage_format(model_description: Union[Dict[str, Any], ModelDescription]) -> Dict[str, Any]:
 
-    :param filepaths: str - save all into one file
-            or tuple of strings - save model as json to first,
-            and state dict to second pkl
-
-    :param model_description: dict with parsing results
-    """
     model_description = dict(model_description)
     model_description = model_description.copy()
-    unique_layers: List[nn.Module] = model_description.pop('unique_layers')
 
+    unique_layers: List[nn.Module] = model_description.pop('unique_layers')
     layers_indices: List[int] = model_description.pop('layers_indices')
     layers_in_out_channels = model_description.pop('layers_in_out_channels')
 
@@ -117,8 +107,27 @@ def save(filepaths: Union[str, Tuple[str, str]],
                                                                unique_layers_in_out,
                                                                unique_layers_nodes)]
     unique_layers_state_dicts = [L.state_dict() for L in unique_layers]
+
     model_description['layers'] = unique_layers_recreators
     model_description['layers_state_dicts'] = unique_layers_state_dicts
+
+    return model_description
+
+
+def save(filepaths: Union[str, Tuple[str, str]],
+         model_description: Union[Dict[str, Any], ModelDescription],
+         with_state_dict: bool = True
+         ):
+    """
+    Save state of executor.
+
+    :param filepaths: str - save all into one file
+            or tuple of strings - save model as json to first,
+            and state dict to second pkl
+
+    :param model_description: dict with parsing results
+    """
+    model_description = model_description_to_storage_format(model_description)
 
     if isinstance(filepaths, str):
         torch.save(model_description, filepaths)
@@ -126,8 +135,10 @@ def save(filepaths: Union[str, Tuple[str, str]],
     if isinstance(filepaths, tuple):
         # take off state dicts from dict to prevent saving in json
         state_dicts = model_description.pop('layers_state_dicts')
-        # and save it in *.pkl
-        torch.save(state_dicts, filepaths[1])
+
+        if with_state_dict:
+            # and save it in *.pkl
+            torch.save(state_dicts, filepaths[1])
 
         # rest of description save as json
         with open(filepaths[0], 'w', encoding='utf-8') as f:
@@ -186,39 +197,25 @@ def find_src_of_dst(connections, dst_idx, dst_in_idx):
     return None
 
 
-def load(file_paths: Union[str, Tuple[str, str]],
-         map_location=None,
-         strict=True,
-         command_transformer=import_module_of_class) -> ModelDescription:
-    if isinstance(file_paths, str):
-        model_description: Dict = torch.load(
-            file_paths, map_location=map_location)
-    else:
-        with open(file_paths[0], 'r', encoding='utf-8') as f:
-            model_description: Dict = json.load(f)
-
-        if len(file_paths) > 1:
-            try:
-                model_description['layers_state_dicts'] = torch.load(
-                    file_paths[1], map_location=map_location)
-            except Exception as _:
-                log_print("Problem with opening file", file_paths[1])
-                log_print("State dicts not loaded!!!")
-
-    layers_description = model_description.pop('layers')
-    layers_state_dicts = model_description.pop('layers_state_dicts',
+def storage_format_to_model_description(storage_format: Dict[str, Any],
+                                        strict_load_sd: bool = False,
+                                        command_transformer=import_module_of_class
+                                        ) -> ModelDescription:
+    storage_format = storage_format.copy()
+    layers_description = storage_format.pop('layers')
+    layers_state_dicts = storage_format.pop('layers_state_dicts',
                                                [{} for i in layers_description])
 
     # extract descriptions
     nodes_indices, layers, nodes_channels, modules = [], [], [], []
 
     # init connections if not defined
-    model_description['connections'] = model_description.get('connections', [])
+    storage_format['connections'] = storage_format.get('connections', [])
     # get pre defined variables to use with models recreations
-    locals = model_description.get('locals', {}).copy()
+    locals = storage_format.get('locals', {}).copy()
 
     # for auto channels deduction use only first input
-    prev_ch = model_description['inputs_channels'][0]
+    prev_ch = storage_format['inputs_channels'][0]
     # input layer index
     indices_in_use = [0]
     for layer_desc in layers_description:
@@ -286,7 +283,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
 
             # relative connections
             for dst_in_idx, (rel_src_idx, rel_src_out_idx) in enumerate(layer_desc[2]):
-                model_description['connections'].append((rel_src_idx, rel_src_out_idx,
+                storage_format['connections'].append((rel_src_idx, rel_src_out_idx,
                                                          free_idx, dst_in_idx))
 
         # basic / automatic format pattern
@@ -343,7 +340,7 @@ def load(file_paths: Union[str, Tuple[str, str]],
 
     # load state dicts
     for L, state_dict in zip(layers_nn_modules, layers_state_dicts):
-        L.load_state_dict(state_dict, strict)
+        L.load_state_dict(state_dict, strict_load_sd)
 
     # recreate layers indices
     indices = []
@@ -357,13 +354,13 @@ def load(file_paths: Union[str, Tuple[str, str]],
     # get in/out channels for each node
     layers_in_out_channels = [nodes_channels[idx] for idx in layers_indices]
 
-    model_description['unique_layers'] = layers_nn_modules
-    model_description['layers_in_out_channels'] = layers_in_out_channels
-    model_description['layers_indices'] = layers_indices
+    storage_format['unique_layers'] = layers_nn_modules
+    storage_format['layers_in_out_channels'] = layers_in_out_channels
+    storage_format['layers_indices'] = layers_indices
 
     # relative connections
     connections = []
-    for src_idx, src_out_idx, dst_idx, dst_in_idx in model_description['connections']:
+    for src_idx, src_out_idx, dst_idx, dst_in_idx in storage_format['connections']:
         src_idx_computed = dst_idx + src_idx
         # negative idx mean: use src_idx'th layer before dst_idx
         if src_idx < 0 and src_idx_computed >= 0:
@@ -374,10 +371,10 @@ def load(file_paths: Union[str, Tuple[str, str]],
 
     # auto connection
     auto_connections = []
-    if model_description.get("auto_connect", None):
+    if storage_format.get("auto_connect", None):
         # create list of connections
         input_layer_ch_in_out = [
-            [], model_description.get('inputs_channels', [0])]
+            [], storage_format.get('inputs_channels', [0])]
         extended_in_out_ch = [input_layer_ch_in_out, *layers_in_out_channels]
 
         # for each layer
@@ -416,11 +413,11 @@ def load(file_paths: Union[str, Tuple[str, str]],
         connections = sorted(connections, key=lambda x: 10 * x[2] + x[3])
 
     # update connections
-    model_description['connections'] = connections
+    storage_format['connections'] = connections
 
     # relative outputs to absolute
     outputs = []
-    for src_idx, src_out_idx, dst_in_idx in model_description['outputs']:
+    for src_idx, src_out_idx, dst_in_idx in storage_format['outputs']:
         src_idx_computed = len(layers_indices) + 1 + src_idx
         # negative idx mean: use src_idx'th layer before (after) last layers
         if src_idx < 0 and src_idx_computed >= 0:
@@ -428,11 +425,30 @@ def load(file_paths: Union[str, Tuple[str, str]],
         else:
             outputs.append((src_idx, src_out_idx, dst_in_idx))
 
-    model_description['outputs'] = outputs
-    return ModelDescription(**model_description)
+    storage_format['outputs'] = outputs
+    return ModelDescription(**storage_format)
 
-    # return {'layers_indices':layers_indices,
-    #         'unique_layers':unique_layers,
-    #         'layers_in_out_channels':layers_in_out_channels,
-    #         'connections':connections,
-    #         'outputs':outputs}
+
+def load(file_paths: Union[str, Tuple[str, str]],
+         map_location=None,
+         strict=True,
+         command_transformer=import_module_of_class) -> ModelDescription:
+
+    if isinstance(file_paths, str):
+        model_description: Dict = torch.load(
+            file_paths, map_location=map_location)
+    else:
+        with open(file_paths[0], 'r', encoding='utf-8') as f:
+            model_description: Dict = json.load(f)
+
+        if len(file_paths) > 1:
+            try:
+                model_description['layers_state_dicts'] = torch.load(
+                    file_paths[1], map_location=map_location)
+            except Exception as _:
+                log_print("Problem with opening file", file_paths[1])
+                log_print("State dicts not loaded!!!")
+
+    md = storage_format_to_model_description(model_description, strict, command_transformer)
+
+    return md

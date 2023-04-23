@@ -1,7 +1,11 @@
+import os
 from typing import List
 import torch
 from torch import nn
 import nn_executor.models as mm
+
+
+TEST_DIR = os.path.dirname(__file__)
 
 
 class ExampleModel(torch.nn.Module):

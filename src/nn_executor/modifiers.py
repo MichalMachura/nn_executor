@@ -389,10 +389,10 @@ class PassActivationModifier(Modifier):
                  in_module: nn.Module,
                  in_mask_multipliers: List[Tuple[torch.Tensor,
                                                  torch.Tensor]]
-                 ) -> Union[Tuple[nn.Module,
-                                  List[Tuple[torch.Tensor,
-                                             torch.Tensor]]],
-                            None]:
+                 ) -> Tuple[Union[nn.Module, None],
+                            List[BACKWARD_TYPE],
+                            List[BACKWARD_TYPE],
+                            ]:
         mask, mul = in_mask_multipliers[0]
         m = self.clone(in_module)
         # assumption -> multiplier can be propagated to previous layer
@@ -640,7 +640,7 @@ class MulModifier(ElementwiseModifier):
             root = torch.pow(mul, exponent)
             return m, [(mask, root) for i in range(in_module.num)], [(mask, None),]
 
-        # tensors of ones are backpopagated to inputs, mul is stored for applying after (MultiWithConst)
+        # tensors of ones are backpropagated to inputs, mul is stored for applying after (MultiWithConst)
         return m, [(mask, torch.ones_like(mul)) for i in range(in_module.num)], [(mask, mul),]
 
 
@@ -848,10 +848,11 @@ class InputLayerModifier(Modifier):
         # raise NotImplementedError()
         out_mask, out_mul = out_mask_mul[0]
 
-        ch_in = [m[0].sum().item()
-                 for m in in_mask_mul_bias if m[0].sum().item() > 0]
+        # ch_in = [m[0].sum().item()
+        #          for m in in_mask_mul_bias if m[0].sum().item() > 0]
 
-        m = models.InputLayer(ch_in)
+        # m = models.InputLayer(ch_in)
+        m = self.clone(in_module)
 
         return m, [(mask, mul, None) for mask, mul in out_mask_mul]
 
@@ -862,8 +863,8 @@ class InputLayerModifier(Modifier):
                             List[BACKWARD_TYPE],
                             List[BACKWARD_TYPE],
                             ]:
-
-        return self.clone(in_module), [], out_mask_multipliers
+        new_out_mask_multipliers = [(mask, None) for mask, mul in out_mask_multipliers]
+        return self.clone(in_module), [], new_out_mask_multipliers
 
 
 class PrunerModifier(Modifier):

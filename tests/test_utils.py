@@ -1,4 +1,5 @@
 from unittest import TestCase
+import unittest
 import torch
 from nn_executor import utils, executor
 import shared_tests_data
@@ -7,14 +8,18 @@ import shared_tests_data
 class TestSaveLoad(TestCase):
     def __init__(self, methodName: str = ...) -> None:
         super().__init__(methodName)
+        self.pth = shared_tests_data.TEST_DIR + '/tmp/test_tmp.pth'
+        self.json = shared_tests_data.TEST_DIR + '/tmp/test_tmp.json'
+        self.desc_format_json = shared_tests_data.TEST_DIR + '/tmp/test_tmp_desc_format.json'
+        self.desc_format_pth = shared_tests_data.TEST_DIR + '/tmp/test_tmp_desc_format.pth'
 
     def test_with_example_model_pth(self):
 
         model_description = shared_tests_data.get_model_description_1()
         # test save
-        utils.save('./tmp/test_tmp.pth', model_description)
+        utils.save(self.pth, model_description)
         # test load
-        md = utils.load('./tmp/test_tmp.pth', torch.device('cpu'))
+        md = utils.load(self.pth, torch.device('cpu'))
 
         with torch.no_grad():
             t1 = torch.rand((1, 3, 64, 64))
@@ -35,9 +40,9 @@ class TestSaveLoad(TestCase):
 
         model_description = shared_tests_data.get_model_description_1()
         # test save
-        utils.save(('./tmp/test_json.json', './tmp/test_json.pth'), model_description)
+        utils.save((self.json, self.pth), model_description)
         # test load
-        md = utils.load(('./tmp/test_json.json', './tmp/test_json.pth'), torch.device('cpu'), True)
+        md = utils.load((self.json, self.pth), torch.device('cpu'), True)
 
         with torch.no_grad():
             t1 = torch.rand((1, 3, 64, 64))
@@ -58,8 +63,8 @@ class TestSaveLoad(TestCase):
 
         model_description = shared_tests_data.get_model_description_1()
         # test load
-        md = utils.load(('./tmp/test_layers_description_formats.json',), torch.device('cpu'), strict=False)
-        utils.save(('./tmp/test_layers_description_formats_save.json', './tmp/test_layers_description_formats_save.pth'), md)
+        utils.save((self.desc_format_json, self.desc_format_pth), model_description)
+        md = utils.load((self.desc_format_json, ), torch.device('cpu'), strict=False)
 
         with torch.no_grad():
             t1 = torch.rand((1, 3, 64, 64))
@@ -77,3 +82,7 @@ class TestSaveLoad(TestCase):
 
             self.assertAlmostEqual(d1, 0.0, 3, "Results of models before and after save/load to file are different.")
             self.assertAlmostEqual(d2, 0.0, 3, "Results of models before and after save/load to file are different.")
+
+
+if __name__ == "__main__":
+    unittest.main()

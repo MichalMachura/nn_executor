@@ -1,5 +1,7 @@
+from . import types
 from . import connection
 from . import executor
+from . import executor_nodes
 from . import models
 from . import model_description
 from . import modifiers
@@ -7,5 +9,5 @@ from . import parser
 from . import prune
 from . import pruner_base
 from . import training
-from . import types
 from . import utils
+from . import static

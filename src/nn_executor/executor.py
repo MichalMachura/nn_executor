@@ -1,119 +1,28 @@
 from typing import Any, Dict, List, Tuple
-import torch
 from torch import nn
 from nn_executor import models
+from nn_executor.executor_nodes import Node, InputNode, OutputNode
+from nn_executor.executor_nodes import DATA_TYPE
 
 
-def get_from_idx(x, idx: int):
+class ExecutorException(Exception):
+    def __init__(self, node: Node, e: Exception) -> None:
+        super().__init__()
+        self.e = e
+        self.node = node
 
-    if type(x) in [tuple, list]:
-        return x[idx]
+    def __str__(self) -> str:
+        s = str(self.e)
+        s += f"{repr(self.L)};\n"
+        s += f"Inputs shapes: {[v.shape for v in self.node.inputs_values]}\n"
 
-    if idx != 0:
-        raise RuntimeError("Idx != 0 for non container")
+        for dst_input_idx, src_output_idx, dst_node in self.node.outputs:
+            s += f"dst_input_idx: {dst_input_idx}, src_output_idx: {src_output_idx}, dst_node: {repr(src_output_idx)} \n"
 
-    return x
-
-
-class Node:
-
-    def __init__(self,
-                 layer: nn.Module,
-                 degree: Tuple[int, int] = (1, 1),
-                 node_idx: int = 0) -> None:
-        self.layer = layer
-        self.node_idx = node_idx
-        # [(dst_input_idx, src_output_idx, dst_node)]
-        self.outputs: List[Tuple[int, int, 'Node']] = []
-        self.degree = degree
-        self.ready_inputs_cntr = 0
-        self.inputs_values = [None for i in range(degree[0])]
-
-    def set_input(self, idx: int, x: torch.Tensor) -> 'Node':
-        if idx >= len(self.inputs_values):
-            raise RuntimeError(
-                "idx =", idx, "is over last available idx =", len(self.inputs_values) - 1)
-
-        # set proper input
-        self.inputs_values[idx] = x
-        # increase cntr
-        self.ready_inputs_cntr += 1
-
-        if self.is_active:
-            return self
-
-        return None
-
-    @property
-    def is_active(self):
-        return self.ready_inputs_cntr == len(self.inputs_values)
-
-    def add_src(self, src_output_idx: int, src: 'Node', dst_input_idx: int):
-        # resize input buffer to hold all inputs
-        if dst_input_idx >= len(self.inputs_values):
-            raise RuntimeError(
-                f"dst_input_idx = {dst_input_idx} is out of range for input of size {self.degree[0]}")
-
-        # add this node to it's src
-        src.outputs.append((dst_input_idx, src_output_idx, self))
+        return s
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(layer={self.layer}, degree={self.degree}, node_idx={self.node_idx})"
-
-    def __call__(self) -> List['Node']:
-        # basic layer forward
-        output = self.layer(*self.inputs_values)
-        # free inputs buffers
-        self.ready_inputs_cntr = 0
-        self.inputs_values = [None for i in self.inputs_values]
-
-        activated = []
-        for dst_input_idx, src_output_idx, dst_node in self.outputs:
-            # choose one of results
-            result_to_dst = get_from_idx(output, src_output_idx)
-            # propagate to dst node
-            active_node = dst_node.set_input(dst_input_idx, result_to_dst)
-            # if node is activated
-            if active_node is not None:
-                # add to list
-                activated.append(active_node)
-
-        # return new activated nodes
-        return activated
-
-
-class InputNode(Node):
-    def __init__(self, layer: nn.Module, num_of_inputs: int = 1) -> None:
-        super().__init__(layer, (num_of_inputs, num_of_inputs), 0)
-        self.inputs_values = [None for i in range(num_of_inputs)]
-
-
-class OutputNode(Node):
-    def __init__(self,
-                 layer: nn.Module,
-                 num_of_outputs: int,
-                 node_idx: int) -> None:
-        super().__init__(layer, (num_of_outputs, num_of_outputs), node_idx)
-
-    def set_input(self, idx: int, x) -> 'Node':
-        _ = super().set_input(idx, x)
-        # always return None -- prevent execution as basic node
-        # return None
-
-    def __call__(self):
-        # get buffered values
-        values = self.inputs_values
-        # reset buffers
-        self.inputs_values = [None for i in self.inputs_values]
-        self.ready_inputs_cntr = 0
-
-        if len(values) == 0:
-            return None
-
-        if len(values) == 1:
-            return values[0]
-
-        return values
+        return self.__str__()
 
 
 class Executor(nn.Module):
@@ -206,7 +115,7 @@ class Executor(nn.Module):
             src_node: Node = self.nodes[src]
             dst_node.add_src(src_out_idx, src_node, dst_in_idx)
 
-    def forward(self, *args):
+    def forward(self, *args) -> List[DATA_TYPE]:
         for i, x in enumerate(args):
             _ = self.nodes[0].set_input(i, x)
 
@@ -216,7 +125,13 @@ class Executor(nn.Module):
         active_layers = [n for n in self.nodes if n.is_active]
         while len(active_layers):
             L = active_layers.pop(0)
-            newly_activated = L()
+            try:
+                newly_activated = L()
+            except RuntimeError as e:
+                raise ExecutorException(L, e)
+            except Exception as e:
+                raise ExecutorException(L, e)
+
             active_layers.extend(newly_activated)
 
         outputs = self.nodes[-1]()

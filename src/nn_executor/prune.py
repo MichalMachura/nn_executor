@@ -171,7 +171,6 @@ class BidirectionalNode:
         self.outputs_availability = [len(self.dst_nodes[i]) > 0 for i in range(len(self.outputs_channels))]
         self.outputs_dst_availability = [[True]*len(out_buffs) for out_buffs in self.backward_buffers]
 
-
     @property
     def forward_ready(self):
         # sum inputs with ready flag and check if all are True
@@ -289,11 +288,11 @@ class BidirectionalNode:
             # init availability for each dst
             outputs_dst_availabilities.append([False for N in self.dst_nodes[out_idx]])
             # iterate over all destinies
-            for i,((backwared_mask,_),
+            for i,((backwarded_mask,_),
                    (dst_idx,dst_in_idx)) in enumerate(zip(OUTPUT_MASK_MULS,
                                                           self.dst_nodes[out_idx])):
                 # mask both masks
-                mask = torch.logical_and(backwared_mask,MASK)
+                mask = torch.logical_and(backwarded_mask,MASK)
                 # num of channe;s
                 ch = mask.sum().item()
                 # determinate availability
@@ -452,49 +451,23 @@ class Scissors:
         forward_propagation_put = lambda *x: forward_propagation_queue.put_nowait(x)
         backward_propagation_put = lambda *x: backward_propagation_queue.put_nowait(x)
 
-        # add output node to backward queue
-        for node in self.nodes:
-            if node.backward_ready:
-                backward_put(node.node_idx)
+        self.__add_output_nodes_to_backward_queue(backward_put)
 
-        # set nodes callbacks
-        for node in self.nodes:
-            node.on_backward_available = backward_put
-            node.on_forward_available = forward_put
-            node.on_propagate_backward = backward_propagation_put
-            node.on_propagate_forward = forward_propagation_put
+        self.__set_nodes_callbacks(forward_put, backward_put,
+                                   forward_propagation_put, backward_propagation_put)
 
         while not forward_queue.empty()\
                 or not backward_queue.empty()\
                 or not forward_propagation_queue.empty()\
                 or not backward_propagation_queue.empty():
-            # propagate backward
-            while not backward_propagation_queue.empty():
-                mask_mul,\
-                src_node_idx,src_out_idx,\
-                dst_node_idx,dst_in_idx = backward_propagation_queue.get_nowait()
-                # set mask_mul in src node backward buffers
-                self.nodes[src_node_idx].take_from_backward(mask_mul,src_out_idx,dst_node_idx,dst_in_idx)
 
-            # propagate forward
-            while not forward_propagation_queue.empty():
-                mask_mul_bias,\
-                src_node_idx,src_out_idx,\
-                dst_node_idx,dst_in_idx = forward_propagation_queue.get_nowait()
-                # set mask_mul in src node backward buffers
-                self.nodes[dst_node_idx].take_from_forward(mask_mul_bias,dst_in_idx)
+            # propagation of active nodes
+            self.__propagate_backward(backward_propagation_queue)
+            self.__propagate_forward(forward_propagation_queue)
 
-            # backward nodes modification
-            while not backward_queue.empty():
-                node_idx = backward_queue.get_nowait()
-                node = self.nodes[node_idx]
-                node.backward(self.nodes_modifiers)
-
-            # forward nodes modification
-            while not forward_queue.empty():
-                node_idx = forward_queue.get_nowait()
-                node = self.nodes[node_idx]
-                node.forward(self.nodes_modifiers)
+            # nodes modification
+            self.__backward_nodes_modification(backward_queue)
+            self.__forward_nodes_modification(forward_queue)
 
         # EXTRACT NEW MODEL DESCRIPTION
         nodes_to_dst_connections:List[CONNECTION] = []
@@ -557,6 +530,46 @@ class Scissors:
         model_description = p.parse_module(net,t)
 
         return model_description
+
+    def __propagate_forward(self, forward_propagation_queue):
+        while not forward_propagation_queue.empty():
+            mask_mul_bias,\
+                src_node_idx,src_out_idx,\
+                dst_node_idx,dst_in_idx = forward_propagation_queue.get_nowait()
+                # set mask_mul in src node backward buffers
+            self.nodes[dst_node_idx].take_from_forward(mask_mul_bias,dst_in_idx)
+
+    def __propagate_backward(self, backward_propagation_queue):
+        while not backward_propagation_queue.empty():
+            mask_mul,\
+                src_node_idx,src_out_idx,\
+                dst_node_idx,dst_in_idx = backward_propagation_queue.get_nowait()
+                # set mask_mul in src node backward buffers
+            self.nodes[src_node_idx].take_from_backward(mask_mul,src_out_idx,dst_node_idx,dst_in_idx)
+
+    def __set_nodes_callbacks(self, forward_put, backward_put, forward_propagation_put, backward_propagation_put):
+        for node in self.nodes:
+            node.on_backward_available = backward_put
+            node.on_forward_available = forward_put
+            node.on_propagate_backward = backward_propagation_put
+            node.on_propagate_forward = forward_propagation_put
+
+    def __add_output_nodes_to_backward_queue(self, backward_put):
+        for node in self.nodes:
+            if node.backward_ready:
+                backward_put(node.node_idx)
+
+    def __forward_nodes_modification(self, forward_queue):
+        while not forward_queue.empty():
+            node_idx = forward_queue.get_nowait()
+            node = self.nodes[node_idx]
+            node.forward(self.nodes_modifiers)
+
+    def __backward_nodes_modification(self, backward_queue):
+        while not backward_queue.empty():
+            node_idx = backward_queue.get_nowait()
+            node = self.nodes[node_idx]
+            node.backward(self.nodes_modifiers)
 
     def __reindexate(self,
                      nodes_inputs_masks,

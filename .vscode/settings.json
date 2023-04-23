@@ -6,8 +6,8 @@
     "editor.tabSize": 4,
     "git.ignoreLimitWarning": true,
     "jupyter.debugJustMyCode": false,
+
     "pylint.args": [
-        "--jobs=3",
         "--disable=C0114", // docsrings
         "--disable=C0115", // docsrings
         "--disable=C0116", // docsrings
@@ -26,30 +26,33 @@
         "--disable=W1203", //logging-fstring-interpolation
         // "--disable=R1705",
         "--disable=W0221", // arguments-differ
-        // "--disable=W0621", // redefined outer name variable
+        "--disable=W0621", // redefined outer name variable
         // "--disable=W0703",
         "--disable=C0415", //import-outside-toplevel
         "--max-line-length=120",
         // "--extension-pkg-allow-list=cv2",
-        "--generated-members=torch.*, skimage.*"
+        "--generated-members=torch.*, skimage.*",
+        "--init-hook='\"import sys; sys.path.append('${workspaceFolder}/src')\""
     ],
     "pylint.importStrategy": "fromEnvironment",
     "pylint.interpreter": [
         "/Users/michalmachura/opt/anaconda3/envs/nn_executor_venv/bin/python"
     ],
-    "pylint.logLevel": "warn",
+    "pylint.logLevel": "info",
     "pylint.severity": {
         "convention": "Warning",
         "refactor": "Warning",
         "info": "Hint"
     },
+    "pylint.path": ["/Users/michalmachura/opt/anaconda3/envs/nn_executor_venv/bin/python", "-m", "pylint"],
     "python.analysis.autoImportCompletions": true,
     "python.analysis.autoSearchPaths": true,
-    "python.analysis.completeFunctionParens": false,
+    "python.analysis.completeFunctionParens": true,
     "python.analysis.diagnosticMode": "workspace",
     "python.analysis.extraPaths": [
         "${workspaceFolder}",
         "${workspaceFolder}/src",
+        "${workspaceFolder}/tests",
     ],
     "python.analysis.importFormat": "absolute",
     "python.analysis.indexing": true,
@@ -59,52 +62,51 @@
     "python.analysis.useLibraryCodeForTypes": true,
     "python.autoComplete.extraPaths": [
         "${workspaceFolder}",
-        "${workspaceFolder}/src"
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/tests"
     ],
     "python.defaultInterpreterPath": "/Users/michalmachura/opt/anaconda3/envs/nn_executor_venv/bin/python",
     "python.formatting.autopep8Args": [
         "--max-line-length=200",
-        "--select=E,W"
+        "--select=E,W",
     ],
     "python.formatting.provider": "autopep8",
     "python.languageServer": "Pylance",
+
     "python.linting.cwd": "${workspaceFolder}/src",
-    "python.linting.enabled": true,
+    "python.linting.enabled": false,
     "python.linting.lintOnSave": true,
-    "python.linting.maxNumberOfProblems": 50,
+    "python.linting.maxNumberOfProblems": 100,
     "python.linting.mypyArgs": [],
-    "python.linting.pycodestyleArgs": [
-        "--max-line-length=120",
-        "--ignore=E0213"
-    ],
+    "python.linting.pycodestyleArgs": [],
     "python.linting.pycodestyleCategorySeverity.E": "Error",
     "python.linting.pycodestyleCategorySeverity.W": "Warning",
     "python.linting.pycodestyleEnabled": false,
     "python.linting.pydocstyleEnabled": false,
-    "python.linting.pylintArgs": [
-        "--generated-members=numpy.* ,torch.*"
-    ],
-    "python.linting.pylintEnabled": true,
+    "python.linting.pylintArgs": [],
+    "python.linting.pylintEnabled": false,
+
     "python.terminal.activateEnvInCurrentTerminal": true,
     "python.terminal.activateEnvironment": true,
-    "python.condaPath": "nn_executor_venv",
     "python.testing.autoTestDiscoverOnSaveEnabled": true,
     "python.testing.cwd": "${workspaceFolder}/src",
     "python.testing.pytestEnabled": false,
+    "python.testing.unittestEnabled": true,
     "python.testing.unittestArgs": [
         "-v",
         "--locals",
         "-t",
-        "${workspaceFolder}/src",
+        "${workspaceFolder}/tests",
         "-s",
         "${workspaceFolder}/tests",
         "-p",
-        "*test_*.py"
+        "test_*.py"
     ],
-    "python.testing.unittestEnabled": true,
     "pythonIndent.keepHangingBracketOnLine": true,
     "terminal.integrated.defaultProfile.osx": "zsh",
-    "terminal.integrated.env.osx": {},
+    "terminal.integrated.env.osx": {
+        "PYTHONPATH": "${workspaceFolder}:${workspaceFolder}/src:${workspaceFolder}/tests:${env:PYTHONPATH}",
+    },
     "[python]": {
         "editor.rulers": [
             {
@@ -122,5 +124,9 @@
         ],
         "editor.defaultFormatter": "ms-python.python",
         "editor.formatOnSave": false
-    }
+    },
+    "python.analysis.autoImportUserSymbols": true,
+    "python.analysis.logLevel": "Information",
+    "pythonTestExplorer.testFramework": "unittest",
+    // "testExplorer.useNativeTesting": true
 }

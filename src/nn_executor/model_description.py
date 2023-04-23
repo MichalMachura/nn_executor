@@ -5,22 +5,45 @@ import torch
 
 @dataclass
 class ModelDescription:
+    """
+    layers_indices: List[int]
+    unique_layers: List[torch.nn.Module]
+    layers_in_out_channels: List[List[int]]
+    connections: List[Tuple[int, int, int, int]]
+    outputs: List[List[int]]
+    inputs_channels: List[int]
+    outputs_channels: List[int]
+    """
+
     layers_indices: List[int] = field(default_factory=list)
     """Indices of unique modules: position is index of node, value is index of unique module."""
+
     unique_layers: List[torch.nn.Module] = field(default_factory=list)
     """List of unique torch modules."""
+
     layers_in_out_channels: List[List[int]] = field(default_factory=list)
     """Two element list:
     - first is list of number of channels for each input
     - second is list of number of channels for each output"""
+
     connections: List[Tuple[int, int, int, int]] = field(default_factory=list)
     """[(src_node_idx, src_node_out_idx, dst_node_idx, dst_node_in_idx),]"""
+
     outputs: List[List[int]] = field(default_factory=list)
     """[(output_node_src_idx, output_node_src_out_idx),]"""
+
+    inputs_channels: List[int] = field(default_factory=list)
+    """[in1_num_of_ch, in2_num_of_ch, ...]"""
+
+    outputs_channels: List[int] = field(default_factory=list)
+    """[out1_num_of_ch, out2_num_of_ch, ...]"""
 
     @staticmethod
     def make_from_dict(d: Dict[str, Any]):
         return ModelDescription(**d)
+
+    def to_dict(self):
+        return dict(self.items())
 
     def copy(self) -> 'ModelDescription':
         return ModelDescription(**dict(self))
