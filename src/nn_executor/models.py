@@ -9,6 +9,8 @@ DIFFERENTIATE_TENSOR = False
 
 
 class Identity(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
 
     def forward(self, *args):
         if DIFFERENTIATE_TENSOR:
@@ -21,6 +23,15 @@ class Identity(nn.Module):
             return args[0]
 
         return args
+
+
+class Absorber(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, *args):
+        return None
+
 
 
 class Upsample(nn.Upsample):
@@ -164,6 +175,46 @@ class ModuleWithConstArgs(nn.Module):
         y = self.module(*joined_args)
 
         return y
+
+
+class ConvBnRelu(torch.nn.Module):
+    def __init__(self,ch_in: int, ch_out: int, ks: int, padding: int = 0,
+                 groups: int = 1, stride: int = 1, dilation: int = 1, bias: bool = False) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(ch_in, ch_out, ks, stride, padding, dilation, groups, bias=bias)
+        self.bn = nn.BatchNorm2d(ch_out)
+        self.act = nn.ReLU()
+
+    def forward(self, x: torch.Tensor):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.act(x)
+        return x
+
+
+class ResBlock(nn.Module):
+    def __init__(self, ch_in: int, ch_inter, ks: int) -> None:
+        super().__init__()
+        self.conv1 = ConvBnRelu(ch_in, ch_inter, ks, padding=ks//2)
+        self.conv2 = ConvBnRelu(ch_inter, ch_in, ks, padding=ks//2)
+        self.adder = Add(2)
+
+    def forward(self, x: torch.Tensor):
+        y = self.conv1(x)
+        y = self.conv2(y)
+        r = self.adder(x, y)
+        return r
+
+
+class ResBranch(nn.Module):
+    def __init__(self, ch_in: int, ch_inter: int, ks: int = 1, num_blocks: int = 1) -> None:
+        super().__init__()
+        blocks = [ResBlock(ch_in, ch_inter, ks) for i in range(num_blocks)]
+        self.blocks = nn.Sequential(*blocks)
+
+    def forward(self, x: torch.Tensor):
+        x = self.blocks(x)
+        return x
 
 
 class Cat(nn.Module):
@@ -445,12 +496,19 @@ class YOLOAnchorMul(YOLO):
 
 
 class Parallel(nn.Module):
-    def __init__(self, merger: nn.Module, branches: List[nn.Module]) -> None:
+    def __init__(self, merger: nn.Module, *branches: Union[List[nn.Module], nn.Module]) -> None:
         super().__init__()
-        self.merger = merger
-        self.branches = branches
+        self.merger:nn.Module = merger
+        joined = []
 
-        for i, b in enumerate(branches):
+        for b in branches:
+            if not isinstance(b, list):
+                b = [b]
+            joined.extend(b)
+
+        self.branches: List[nn.Module] = joined
+
+        for i, b in enumerate(self.branches):
             self.add_module("Branch_" + str(i), b)
 
     def forward(self, x):

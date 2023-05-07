@@ -487,9 +487,9 @@ class ElementwiseModifier(Modifier):
 
 
 class AddModifier(ElementwiseModifier):
-    def __init__(self) -> None:
+    def __init__(self, use_bias: bool = False) -> None:
         super().__init__(models.Add)
-        self.mul_support = False
+        self.__use_bias = use_bias
 
     def forward(self,
                 in_module: models.Add,
@@ -531,9 +531,6 @@ class AddModifier(ElementwiseModifier):
 
         # only bias if available
         if len(masks) == 0:
-            if BIAS is None:
-                return None, [(torch.zeros_like(out_mask), None, None),]
-
             return None, [(out_mask, None, BIAS),]
 
         mask = utils.between_all(torch.logical_and, masks)
@@ -554,7 +551,7 @@ class AddModifier(ElementwiseModifier):
         # adder with input for bias
         m = models.Add(len(masks)+int(BIAS is not None))
 
-        if BIAS is not None:
+        if BIAS is not None and self.__use_bias:
             b = models.Variable(BIAS[mask].reshape(1, -1, 1, 1))
             m = models.ModuleWithConstArgs(m)
             m.add(0, b)

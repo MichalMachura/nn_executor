@@ -1,10 +1,24 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 import unittest
 import torch
 from nn_executor import modifiers, models, prune, parser, utils
 from nn_executor.executor import Executor
 from nn_executor.model_description import ModelDescription
 import shared_tests_data
+
+
+def append_conv(model: torch.nn.Module,
+                ch_in: int,
+                ch_out: int = 1):
+    conv = torch.nn.Conv2d(ch_in, ch_out, 3, padding=1)
+    return torch.nn.Sequential(model, conv)
+
+
+def pre_conv(model: torch.nn.Module,
+             ch_in: int,
+             ch_out: int):
+    conv = torch.nn.Conv2d(ch_in, ch_out, 3, padding=1)
+    return torch.nn.Sequential(conv, model)
 
 
 class TestScissors(unittest.TestCase):
@@ -21,8 +35,8 @@ class TestScissors(unittest.TestCase):
             models.Add: modifiers.AddModifier(),
             models.Upsample: modifiers.UpsampleModifier(),
         }
-        self.pth = shared_tests_data.TEST_DIR + '/tmp/test_before_prune_tmp_{}.pth'
-        self.json = shared_tests_data.TEST_DIR + '/tmp/test_after_prune_tmp_{}.json'
+        self.pth = shared_tests_data.TEST_DIR + '/tmp/test_prune_tmp_{}_before.pth'
+        self.json = shared_tests_data.TEST_DIR + '/tmp/test_prune_tmp_{}_after.json'
 
         self.chain_1 = torch.nn.Sequential(
                                 torch.nn.Conv2d(5, 3, 3, padding=1),
@@ -45,10 +59,7 @@ class TestScissors(unittest.TestCase):
         self.ADD_1_ref = models.Parallel(models.Add(2),
                             [
                             models.Identity(),
-                            torch.nn.Sequential(
-                                torch.nn.Conv2d(5, 2, 3, padding=1),
-                                torch.nn.Conv2d(2, 5, 3, padding=1),
-                            )
+                            self.chain_1_ref
                             ])
         ############################################
         self.ADD_2 = models.Parallel(models.Add(2),
@@ -63,8 +74,7 @@ class TestScissors(unittest.TestCase):
                             ])
         self.ADD_2_ref = models.Parallel(models.Add(2),
                             [
-                            models.Identity(),
-                            models.Identity(),
+                            models.Identity()
                             ])
         ############################################
         self.ADD_3 = models.Parallel(models.Add(2),
@@ -90,6 +100,7 @@ class TestScissors(unittest.TestCase):
         ############################################
 
         self.R1 = torch.nn.Sequential(
+            torch.nn.Conv2d(5, 5, 3, padding=1),
             shared_tests_data.pruner([1, 1, 1, 1, 0]),
             self.ADD_1,
             shared_tests_data.pruner([1, 1, 1, 1, 0]),
@@ -97,6 +108,43 @@ class TestScissors(unittest.TestCase):
             shared_tests_data.pruner([1, 1, 1, 1, 0]),
             self.ADD_3,
             shared_tests_data.pruner([1, 1, 1, 1, 0]),
+            torch.nn.Conv2d(5, 5, 3, padding=1),
+        )
+        self.R1_ref = torch.nn.Sequential(
+            torch.nn.Conv2d(5, 4, 3, padding=1),
+            # shared_tests_data.pruner([1, 1, 1, 1, 0]),
+            models.Identity(),
+            models.Parallel(models.Add(2),
+                            [
+                            models.Identity(),
+                            torch.nn.Sequential(
+                                torch.nn.Conv2d(4, 2, 3, padding=1),
+                                models.Identity(),
+                                torch.nn.Conv2d(2, 4, 3, padding=1),
+                                models.Identity(),
+                            )
+                            ]),
+            # shared_tests_data.pruner([1, 1, 1, 1, 0]),
+            models.Identity(),
+            models.Parallel(models.Add(2),
+                            [
+                            models.Identity()
+                            ]),
+            # shared_tests_data.pruner([1, 1, 1, 1, 0]),
+            models.Identity(),
+            models.Parallel(models.Add(2),
+                            [
+                            models.Identity(),
+                            torch.nn.Sequential(
+                                torch.nn.Conv2d(4, 5, 3, padding=1),
+                                models.Identity(),
+                                torch.nn.Conv2d(5, 4, 3, padding=1),
+                                models.Identity(),
+                            )
+                            ]),
+            # shared_tests_data.pruner([1, 1, 1, 1, 0]),
+            models.Identity(),
+            torch.nn.Conv2d(4, 5, 3, padding=1),
         )
         ############################################
 
@@ -110,6 +158,16 @@ class TestScissors(unittest.TestCase):
                                 shared_tests_data.pruner([1, 1, 0, 1, 0], False),
                             )
                             ])
+        self.ADD_4_ref = models.Parallel(models.Add(2),
+                            [
+                            models.Identity(),
+                            torch.nn.Sequential(
+                                torch.nn.Conv2d(5, 2, 3, padding=1),
+                                models.Identity(),
+                                torch.nn.Conv2d(2, 5, 3, padding=1),
+                                models.Identity(),
+                            )
+                            ])
         ############################################
         self.ADD_5 = models.Parallel(models.Add(2),
                             [
@@ -120,6 +178,10 @@ class TestScissors(unittest.TestCase):
                                 torch.nn.Conv2d(3, 5, 3, padding=1),
                                 shared_tests_data.pruner([1, 0, 0, 1, 0], False),
                             )
+                            ])
+        self.ADD_5_ref = models.Parallel(models.Add(2),
+                            [
+                            models.Identity()
                             ])
         ############################################
         self.ADD_6 = models.Parallel(models.Add(2),
@@ -132,6 +194,16 @@ class TestScissors(unittest.TestCase):
                                 shared_tests_data.pruner([0, 1, 0, 1, 0], False),
                             )
                             ])
+        self.ADD_6_ref = models.Parallel(models.Add(2),
+                            [
+                            models.Identity(),
+                            torch.nn.Sequential(
+                                torch.nn.Conv2d(5, 5, 3, padding=1),
+                                models.Identity(),
+                                torch.nn.Conv2d(5, 5, 3, padding=1),
+                                models.Identity(),
+                            )
+                            ])
         ############################################
         self.R2 = torch.nn.Sequential(
             shared_tests_data.pruner([0, 0, 0, 0, 0]),
@@ -142,6 +214,8 @@ class TestScissors(unittest.TestCase):
             self.ADD_6,
             shared_tests_data.pruner([0, 0, 0, 0, 0]),
         )
+        self.R2_ref = models.Absorber()
+
         ############################################
         self.BRANCH_1 = torch.nn.Sequential(
                     torch.nn.Conv2d(5, 6, 3, padding=1),
@@ -152,12 +226,22 @@ class TestScissors(unittest.TestCase):
                     torch.nn.Conv2d(6, 2, 3, padding=1),
                     shared_tests_data.pruner([1, 0]),
                 )
+        self.BRANCH_1_ref = torch.nn.Sequential(
+                    torch.nn.Conv2d(5, 3, 3, padding=1),
+                    models.Identity(),
+                    torch.nn.Conv2d(3, 3, 3, padding=1),
+                    models.Identity(),
+                    models.Identity(),
+                    torch.nn.Conv2d(3, 1, 3, padding=1),
+                    models.Identity(),
+                )
         ############################################
         self.BRANCH_2 = torch.nn.Sequential(
                     torch.nn.Conv2d(5, 6, 9, padding=4),
                     shared_tests_data.pruner([0, 0, 0, 0, 0, 0]),
                     torch.nn.Conv2d(6, 2, 3, padding=1),
                 )
+        self.BRANCH_2_ref = models.Absorber()
         ############################################
         self.BRANCH_3 = torch.nn.Sequential(
                     torch.nn.Conv2d(5, 6, 3, padding=1),
@@ -165,12 +249,24 @@ class TestScissors(unittest.TestCase):
                     torch.nn.Conv2d(6, 5, 3, padding=1),
                     shared_tests_data.pruner([1, 0, 1, 0, 1]),
                 )
+        self.BRANCH_3_ref = torch.nn.Sequential(
+                    torch.nn.Conv2d(5, 6, 3, padding=1),
+                    models.Identity(),
+                    torch.nn.Conv2d(6, 3, 3, padding=1),
+                    models.Identity(),
+                )
         ############################################
         self.BRANCH_4 = torch.nn.Sequential(
                     torch.nn.Conv2d(5, 6, 3, padding=1),
                     shared_tests_data.pruner([1, 1, 0, 1, 1, 1]),
                     torch.nn.Conv2d(6, 3, 3, padding=1),
                     shared_tests_data.pruner([1, 0, 0]),
+                )
+        self.BRANCH_4_ref = torch.nn.Sequential(
+                    torch.nn.Conv2d(5, 5, 3, padding=1),
+                    models.Identity(),
+                    torch.nn.Conv2d(5, 1, 3, padding=1),
+                    models.Identity(),
                 )
         ############################################
 
@@ -182,8 +278,17 @@ class TestScissors(unittest.TestCase):
                 self.BRANCH_3,
                 self.BRANCH_4,
             ])
+        self.CAT_1_ref = models.Parallel(models.Cat(1),
+                            [
+                models.Identity(),
+                self.BRANCH_1_ref,
+                self.BRANCH_2_ref,
+                self.BRANCH_3_ref,
+                self.BRANCH_4_ref,
+            ])
         ############################################
         self.CAT_2 = models.Parallel(models.Cat(1), [self.R1, self.R2])
+        self.CAT_2_ref = models.Parallel(models.Cat(1), [self.R1_ref, self.R2_ref])
         ############################################
 
         L = [
@@ -241,7 +346,7 @@ class TestScissors(unittest.TestCase):
         return md
 
     def __compare_layer_indices(self, base_indices: List[int], ref_indices: List[int]):
-        self.assertCountEqual(base_indices, ref_indices,
+        self.assertEqual(len(base_indices), len(ref_indices),
                          f"Layers indices have different lengths: {len(base_indices)}, {len(ref_indices)}")
 
         for i, (base, ref) in enumerate(zip(base_indices, ref_indices)):
@@ -251,13 +356,11 @@ class TestScissors(unittest.TestCase):
                                 base_layers: List[torch.nn.Module],
                                 ref_layers: List[torch.nn.Module],
                                 ):
-        self.assertCountEqual(base_layers, ref_layers,
+        self.assertEqual(len(base_layers), len(ref_layers),
                          f"Layers lists have different lengths: {len(base_layers)}, {len(ref_layers)}")
 
         for i, (base, ref) in enumerate(zip(base_layers, ref_layers)):
-            self.assertTrue(isinstance(base, ref.__class__),
-                            f"Different layers classes at pos {i}")
-            self.assertTrue(isinstance(ref, base.__class__),
+            self.assertTrue(isinstance(base, ref.__class__) and isinstance(ref, base.__class__),
                             f"Different layers classes at pos {i}")
 
     def __compare_model_descriptions(self,
@@ -280,8 +383,7 @@ class TestScissors(unittest.TestCase):
         with utils.DifferentiateTensors(differentiate_tensors):
             t = torch.rand(input_shape, dtype=torch.float32)
             sc = prune.Scissors(model_description, self.modifiers_map)
-            # model_description = sc(t, parser.SUPPORTED_MODULES[:-1])
-            model_description = sc(t, parser.SUPPORTED_MODULES)  #TODO first layer is omitted !!!!!
+            model_description = sc(t, parser.SUPPORTED_MODULES)
 
         if save_name is not None:
             utils.save((self.json.format(save_name),
@@ -306,22 +408,67 @@ class TestScissors(unittest.TestCase):
 
         self.__compare_model_descriptions(pruned_desc, ref_description, input_shape, differentiate_tensors)
 
-
-    # def test_run(self):
-    #     input_shape = (1, 3, 80, 40)
-    #     model_description = self.__make_description(self.model, input_shape)
-    #     pruned_description = self._prune(model_description,
-    #                                      input_shape,
-    #                                      differentiate_tensors=False,
-    #                                      save_name="whole_model")
+    def test_prune_chain_1(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.chain_1, self.chain_1_ref, input_shape, differentiate_tensors=True, save_name='chain_1')
 
     def test_prune_add_1(self):
         input_shape = (1, 5, 80, 40)
         self.__prune_and_compare(self.ADD_1, self.ADD_1_ref, input_shape, differentiate_tensors=True, save_name='ADD_1')
 
-    def test_prune_chain_1(self):
+    def test_prune_add_2(self):
         input_shape = (1, 5, 80, 40)
-        self.__prune_and_compare(self.chain_1, self.chain_1_ref, input_shape, differentiate_tensors=False, save_name='chain_1')
+        self.__prune_and_compare(self.ADD_2, self.ADD_2_ref, input_shape, differentiate_tensors=True, save_name='ADD_2')
+
+    def test_prune_add_3(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.ADD_3, self.ADD_3_ref, input_shape, differentiate_tensors=True, save_name='ADD_3')
+
+    def test_prune_R1(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.R1, self.R1_ref, input_shape, differentiate_tensors=True, save_name='R1')
+
+    def test_prune_add_4(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.ADD_4, self.ADD_4_ref, input_shape, differentiate_tensors=True, save_name='ADD_4')
+
+    def test_prune_add_5(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.ADD_5, self.ADD_5_ref, input_shape, differentiate_tensors=True, save_name='ADD_5')
+
+    def test_prune_add_6(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.ADD_6, self.ADD_6_ref, input_shape, differentiate_tensors=True, save_name='ADD_6')
+
+    def test_prune_R2(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.R2, self.R2_ref, input_shape, differentiate_tensors=True, save_name='R2')
+
+    def test_prune_branch_1(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(append_conv(self.BRANCH_1, 2, 1),
+                                 append_conv(self.BRANCH_1_ref, 1, 1),
+                                 input_shape, differentiate_tensors=True,
+                                 save_name='BRANCH_1')
+
+    def test_prune_branch_2(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(self.BRANCH_2, self.BRANCH_2_ref, input_shape, differentiate_tensors=True, save_name='BRANCH_2')
+
+    def test_prune_branch_3(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(append_conv(self.BRANCH_3, 5 ,1),
+                                 append_conv(self.BRANCH_3_ref, 3 ,1),
+                                 input_shape, differentiate_tensors=True,
+                                 save_name='BRANCH_3')
+
+    def test_prune_branch_4(self):
+        input_shape = (1, 5, 80, 40)
+        self.__prune_and_compare(append_conv(self.BRANCH_4, 3, 1),
+                                 append_conv(self.BRANCH_4_ref, 1, 1),
+                                 input_shape, differentiate_tensors=True,
+                                 save_name='BRANCH_4')
+
 
 if __name__ == '__main__':
     unittest.main()

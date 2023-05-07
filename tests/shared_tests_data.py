@@ -1,8 +1,13 @@
 import os
-from typing import List
+from typing import Any, List, Tuple
 import torch
 from torch import nn
+from nn_executor import utils
+from nn_executor.executor import Executor
+from nn_executor.model_description import ModelDescription
 import nn_executor.models as mm
+from nn_executor.parser import Parser, SUPPORTED_MODULES
+from nn_executor.utils import DifferentiateTensors
 
 
 TEST_DIR = os.path.dirname(__file__)
@@ -55,7 +60,51 @@ class ExampleModel(torch.nn.Module):
         return p, x2
 
 
-def get_model_description_1():
+class ResNet(nn.Module):
+    def __init__(self, ch_in: int, ch_out: int) -> None:
+        super().__init__()
+        self.conv_1 = mm.ConvBnRelu(ch_in, 6, 3, 1)
+        self.mp_1 = nn.MaxPool2d(2)
+        self.resbranch = mm.ResBranch(6, 9, 1, 7)
+
+        self.conv_2 = mm.ConvBnRelu(6, 7, 3, 1)
+        self.mp_2 = nn.MaxPool2d(2)
+        self.res_nl_branch = nn.Sequential(*[nn.Sequential(mm.ResBlock(7, 11, 1), nn.ReLU()) for i in range(9)])
+
+        self.conv_3 = mm.ConvBnRelu(7, 21, 3, 1)
+        self.conv_4 = mm.ConvBnRelu(21, 22, 3, 1)
+        self.conv_5 = mm.ConvBnRelu(22, 23, 3, 1)
+        self.conv_6 = mm.ConvBnRelu(23, 24, 3, 1)
+        self.conv_7 = mm.ConvBnRelu(24, 25, 3, 1)
+
+        self.cat_8 = mm.Cat()
+
+        self.conv_out_9 = mm.ConvBnRelu(115, ch_out, 3, 1)
+
+    def forward(self, x: torch.Tensor):
+        x = self.conv_1(x)
+        x = self.mp_1(x)
+        x1 = self.resbranch(x)
+
+        x = self.conv_2(x1)
+        x = self.mp_2(x)
+        x2 = self.res_nl_branch(x)
+
+        x3 = self.conv_3(x2)
+        x4 = self.conv_4(x3)
+        x5 = self.conv_5(x4)
+        x6 = self.conv_6(x5)
+        x7 = self.conv_7(x6)
+
+        x8 = self.cat_8(x7, x6, x5, x4, x3)
+
+        x9 = self.conv_out_9(x8)
+
+        return x9
+
+
+
+def get_example_description_1() -> ModelDescription:
     unique_layers = [
         nn.Conv2d(3, 5, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)),
         nn.ReLU(),
@@ -109,7 +158,7 @@ def get_model_description_1():
         (19, 0, 20, 0),
     ]
     outputs = [(20, 0, 0), (0, 1, 1)]
-    return {
+    md = {
         'layers_indices': layers_indices,
         'unique_layers': unique_layers,
         'layers_in_out_channels': layers_in_out_channels,
@@ -118,6 +167,8 @@ def get_model_description_1():
         'inputs_channels': [3, 3],
         'outputs_channels': [22, 3],
     }
+
+    return ModelDescription(**md)
 
 
 def pruner(mask: List[int] = None,
@@ -133,5 +184,33 @@ def pruner(mask: List[int] = None,
 
     return p
 
+def reparse_model_description(model_description: ModelDescription,
+                              inputs_shapes: List[Tuple[int, int, int, int]],
+                              differentiate_tensors: bool,
+                              supported_modules: List[Any] = SUPPORTED_MODULES,
+                              ) -> ModelDescription:
+    model = Executor(model_description)
+    md = get_model_description(model, inputs_shapes, differentiate_tensors, supported_modules, reparse=False)
+
+    # simulate writing to file
+    storage_format = utils.model_description_to_storage_format(md)
+    md = utils.storage_format_to_model_description(storage_format)
+
+    return md
 
 
+def get_model_description(model,
+                          inputs_shapes: List[Tuple[int, int, int, int]],
+                          differentiate_tensors: bool = False,
+                          supported_modules: List[Any] = SUPPORTED_MODULES,
+                          reparse: bool = True) -> ModelDescription:
+    with DifferentiateTensors(differentiate_tensors):
+        p = Parser(supported_modules)
+        inputs = [torch.rand(sh) for sh in inputs_shapes]
+        md = p.parse_module(model, *inputs)
+
+    if reparse:
+        rmd = reparse_model_description(md, inputs_shapes, differentiate_tensors, supported_modules)
+        md = rmd
+
+    return md

@@ -527,7 +527,7 @@ class Scissors:
         net = executor.Executor(model_description).eval()
 
         p = parser.Parser(dst_modules)
-        model_description = p.parse_module(net,t)
+        model_description = p.parse_module(net, t)
 
         return model_description
 

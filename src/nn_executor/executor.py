@@ -99,11 +99,11 @@ class Executor(nn.Module):
             L = unique_layers[layer_idx]
             nodes.append(Node(L, degree=degree, node_idx=i + 1))
 
-        inL, outL = models.Identity(), models.Identity()
+        # inL, outL = models.__Identity(), models.__Identity()
 
-        nodes = [InputNode(inL, noi),
+        nodes = [InputNode(noi),
                  *nodes,
-                 OutputNode(outL, noo, len(nodes) + 1)]
+                 OutputNode(noo, len(nodes) + 1)]
 
         return nodes
 
@@ -127,8 +127,7 @@ class Executor(nn.Module):
             L = active_layers.pop(0)
             try:
                 newly_activated = L()
-            except RuntimeError as e:
-                raise ExecutorException(L, e)
+
             except Exception as e:
                 raise ExecutorException(L, e)
 

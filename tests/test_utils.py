@@ -15,7 +15,7 @@ class TestSaveLoad(TestCase):
 
     def test_with_example_model_pth(self):
 
-        model_description = shared_tests_data.get_model_description_1()
+        model_description = shared_tests_data.get_example_description_1()
         # test save
         utils.save(self.pth, model_description)
         # test load
@@ -38,7 +38,7 @@ class TestSaveLoad(TestCase):
 
     def test_with_example_model_json(self):
 
-        model_description = shared_tests_data.get_model_description_1()
+        model_description = shared_tests_data.get_example_description_1()
         # test save
         utils.save((self.json, self.pth), model_description)
         # test load
@@ -61,7 +61,7 @@ class TestSaveLoad(TestCase):
 
     def test_layers_description_formats(self):
 
-        model_description = shared_tests_data.get_model_description_1()
+        model_description = shared_tests_data.get_example_description_1()
         # test load
         utils.save((self.desc_format_json, self.desc_format_pth), model_description)
         md = utils.load((self.desc_format_json, ), torch.device('cpu'), strict=False)

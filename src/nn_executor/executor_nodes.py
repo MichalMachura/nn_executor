@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Literal, Tuple
 import torch
 from torch import nn
 
@@ -84,23 +84,38 @@ class Node:
         return activated
 
 
+class _Identity(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, *args):
+        if len(args) == 0:
+            return None
+        if len(args) == 1:
+            return args[0]
+        return args
+
+
 class InputNode(Node):
-    def __init__(self, layer: nn.Module, num_of_inputs: int = 1) -> None:
-        super().__init__(layer, (num_of_inputs, num_of_inputs), 0)
+    def __init__(self, num_of_inputs: int = 1) -> None:
+        super().__init__(_Identity(), (num_of_inputs, num_of_inputs), 0)
         self.inputs_values = [None for i in range(num_of_inputs)]
 
 
 class OutputNode(Node):
     def __init__(self,
-                 layer: nn.Module,
                  num_of_outputs: int,
                  node_idx: int) -> None:
-        super().__init__(layer, (num_of_outputs, num_of_outputs), node_idx)
+        super().__init__(_Identity(), (num_of_outputs, num_of_outputs), node_idx)
+
+    @property
+    def is_active(self) -> Literal[False]:
+        return False
 
     def set_input(self, idx: int, x) -> 'Node':
         _ = super().set_input(idx, x)
         # always return None -- prevent execution as basic node
-        # return None
+        return None
 
     def __call__(self) -> List[DATA_TYPE]:
         # get buffered values
