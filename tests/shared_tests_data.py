@@ -59,50 +59,26 @@ class ExampleModel(torch.nn.Module):
         p = self.pruner(r)
         return p, x2
 
-
-class ResNet(nn.Module):
-    def __init__(self, ch_in: int, ch_out: int) -> None:
-        super().__init__()
-        self.conv_1 = mm.ConvBnRelu(ch_in, 6, 3, 1)
-        self.mp_1 = nn.MaxPool2d(2)
-        self.resbranch = mm.ResBranch(6, 9, 1, 7)
-
-        self.conv_2 = mm.ConvBnRelu(6, 7, 3, 1)
-        self.mp_2 = nn.MaxPool2d(2)
-        self.res_nl_branch = nn.Sequential(*[nn.Sequential(mm.ResBlock(7, 11, 1), nn.ReLU()) for i in range(9)])
-
-        self.conv_3 = mm.ConvBnRelu(7, 21, 3, 1)
-        self.conv_4 = mm.ConvBnRelu(21, 22, 3, 1)
-        self.conv_5 = mm.ConvBnRelu(22, 23, 3, 1)
-        self.conv_6 = mm.ConvBnRelu(23, 24, 3, 1)
-        self.conv_7 = mm.ConvBnRelu(24, 25, 3, 1)
-
-        self.cat_8 = mm.Cat()
-
-        self.conv_out_9 = mm.ConvBnRelu(115, ch_out, 3, 1)
-
-    def forward(self, x: torch.Tensor):
-        x = self.conv_1(x)
-        x = self.mp_1(x)
-        x1 = self.resbranch(x)
-
-        x = self.conv_2(x1)
-        x = self.mp_2(x)
-        x2 = self.res_nl_branch(x)
-
-        x3 = self.conv_3(x2)
-        x4 = self.conv_4(x3)
-        x5 = self.conv_5(x4)
-        x6 = self.conv_6(x5)
-        x7 = self.conv_7(x6)
-
-        x8 = self.cat_8(x7, x6, x5, x4, x3)
-
-        x9 = self.conv_out_9(x8)
-
-        return x9
-
-
+def get_example_model_2():
+    model = nn.Sequential(
+                        mm.Identity(),
+                        mm.Parallel(mm.Cat(1),
+                                    nn.Sequential(
+                                                nn.Conv2d(5, 5, 1),
+                                                mm.ResBranch(5, 5, 1, 3),
+                                                mm.Parallel(mm.Cat(1),
+                                                            mm.ResBranch(5, 5, 1, 3),
+                                                            mm.ResBranch(5, 5, 1, 2)
+                                                            ),
+                                                nn.Conv2d(10, 5, 1),
+                                                nn.Conv2d(5, 5, 1),
+                                                ),
+                                    nn.Conv2d(5,1,1),
+                                    mm.Identity(),
+                                    ),
+                        mm.Identity(),
+                        )
+    return model
 
 def get_example_description_1() -> ModelDescription:
     unique_layers = [

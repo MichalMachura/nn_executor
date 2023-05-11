@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Union
-from nn_executor.connection import Connection
+from typing import Dict, List, Tuple, Type
 from nn_executor import models as mm
 from nn_executor.model_description import ModelDescription
 from torch import nn
@@ -17,9 +16,9 @@ class NodeDescription:
     is_output_node: bool = False
     is_input_node: bool = False
 
-    __src_nodes_dict: Dict[int, Tuple['NodeDescription', int]] = field(default_factory=dict)
+    _src_nodes_dict: Dict[int, Tuple['NodeDescription', int]] = field(default_factory=dict)
     """{this node input idx : (src node, src node's output idx)}"""
-    __dst_nodes_dict: Dict[int, List[Tuple['NodeDescription', int]]] = field(default_factory=dict)
+    _dst_nodes_dict: Dict[int, List[Tuple['NodeDescription', int]]] = field(default_factory=dict)
     """{this node output idx : [(dst node, dst node's input idx),]}"""
 
     @property
@@ -30,27 +29,27 @@ class NodeDescription:
 
     @property
     def src_nodes(self) -> List['NodeDescription']:
-        nodes = [node for (node, src_output_idx) in self.__src_nodes_dict.values()]
+        nodes = [node for (node, src_output_idx) in self._src_nodes_dict.values()]
         return nodes
 
     @property
     def dst_nodes(self) -> List['NodeDescription']:
         nodes = []
-        for output_dst_nodes in self.__dst_nodes_dict.values():
+        for output_dst_nodes in self._dst_nodes_dict.values():
             for (node, dst_input_idx) in output_dst_nodes:
                 nodes.append(node)
         return nodes
 
     def add_src(self, input_idx: int, src_node: 'NodeDescription', src_output_idx: int):
-        self.__src_nodes_dict[input_idx] = (src_node, src_output_idx)
+        self._src_nodes_dict[input_idx] = (src_node, src_output_idx)
         # sort to keep order of items
-        self.__src_nodes_dict = dict(sorted(self.__src_nodes_dict.items()))
+        self._src_nodes_dict = dict(sorted(self._src_nodes_dict.items()))
 
     def add_dst(self, output_idx: int, dst_node: 'NodeDescription', dst_input_idx: int):
         # TODO dict items should be lists
-        self.__dst_nodes_dict[output_idx] = self.__dst_nodes_dict.get(output_idx, []) + [(dst_node, dst_input_idx)]
+        self._dst_nodes_dict[output_idx] = self._dst_nodes_dict.get(output_idx, []) + [(dst_node, dst_input_idx)]
         # sort to keep order of items
-        self.__dst_nodes_dict = dict(sorted(self.__dst_nodes_dict.items()))
+        self._dst_nodes_dict = dict(sorted(self._dst_nodes_dict.items()))
 
     def __str__(self, indent: str = '') -> str:
         v = ["Node:{",
@@ -99,9 +98,24 @@ class BranchDescription:
 
 
 @dataclass
+class NodeConnectedBranches:
+    node: NodeDescription = None
+    finishes_branches: List[BranchDescription] = field(default_factory=list)
+    generates_branches: List[BranchDescription] = field(default_factory=list)
+
+    @property
+    def finished_branches_sources(self) -> List[NodeDescription]:
+        return [b.src_node for b in self.finishes_branches]
+
+    @property
+    def generated_branches_sources(self) -> List[NodeDescription]:
+        return [b.dst_node for b in self.generates_branches]
+
+
+@dataclass
 class GraphDescription:
     branches: List[BranchDescription] = field(default_factory=list)
-    branches_splitting_nodes: List[NodeDescription] = field(default_factory=list)
+    splitting_nodes: List[NodeDescription] = field(default_factory=list)
     nodes: List[NodeDescription] = field(default_factory=list)
 
     def __str__(self, indent: str = ''):
@@ -110,7 +124,7 @@ class GraphDescription:
             ',\n'.join([node.__str__(indent=_TAB*2) for node in self.nodes]) + ',',
             _TAB + "},",
              _TAB + "Splitting_nodes: {",
-            ',\n'.join([node.__str__(indent=_TAB*2) for node in self.branches_splitting_nodes]) + ',',
+            ',\n'.join([node.__str__(indent=_TAB*2) for node in self.splitting_nodes]) + ',',
             _TAB + "},",
              _TAB + "Branches: {",
             ',\n'.join([branch.__str__(indent=_TAB*2) for branch in self.branches]),
@@ -144,17 +158,17 @@ class GraphDescription:
 
     def __find_splitting_nodes(self):
         splitting_nodes = [node for node in self.nodes if node.degree > 2]
-        self.branches_splitting_nodes = splitting_nodes
+        self.splitting_nodes = splitting_nodes
 
     def __make_branches(self):
         branches = []
-        for splitting_node in self.branches_splitting_nodes:
+        for splitting_node in self.splitting_nodes:
             # iterate over node sources
             for prev_node in splitting_node.src_nodes:
                 branch_nodes = [splitting_node,]
                 iter_node = prev_node
                 # walk through the nodes path, till next splitting node
-                while iter_node not in self.branches_splitting_nodes:
+                while iter_node not in self.splitting_nodes:
                     # node exist and is not branched connection
                     branch_nodes.append(iter_node)
                     iter_node = iter_node.src_nodes[0]
@@ -181,3 +195,24 @@ class GraphDescription:
         gd.__make_branches()
         return gd
 
+    def get_nodes_with_module_type(self, module_type: Type[nn.Module]) -> List[NodeDescription]:
+        # nodes = [node for node in self.nodes if isinstance(node.node_module, module_type)]
+        nodes = []
+        for node in self.nodes:
+            if isinstance(node.node_module, module_type):
+                nodes.append(node)
+        return nodes
+
+    def splitting_nodes_with_branches(self) -> Dict[int, NodeConnectedBranches]:
+        nodes_connected_branches: Dict[int, NodeConnectedBranches] = {}
+        for node in self.splitting_nodes:
+            node_connected = NodeConnectedBranches(node)
+            for branch in self.branches:
+                if branch.src_node is node:
+                    node_connected.generates_branches.append(branch)
+                if branch.dst_node is node:
+                    node_connected.finishes_branches.append(branch)
+
+            nodes_connected_branches[node.node_idx] = node_connected
+
+        return nodes_connected_branches

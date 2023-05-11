@@ -6,8 +6,7 @@ from . import models
 from . import model_description
 from . import modifiers
 from . import parser
-from . import prune
-from . import pruner_base
+from . import pruning
 from . import training
 from . import utils
 from . import static

@@ -67,8 +67,8 @@
     ],
     "python.defaultInterpreterPath": "/Users/michalmachura/opt/anaconda3/envs/nn_executor_venv/bin/python",
     "python.formatting.autopep8Args": [
-        "--max-line-length=200",
-        "--select=E,W",
+        "--max-line-length=120",
+        // "--select=E,W",
     ],
     "python.formatting.provider": "autopep8",
     "python.languageServer": "Pylance",

@@ -13,6 +13,14 @@ class ModifierType:
         return iter((self.mask, self.multiplier, self.bias))
 
 
+@dataclass
+class Connection:
+    src_node: int = None
+    src_node_out_idx: int = None
+    dst_node: int = None
+    dst_node_in_idx: int = 0
+
+
 # TO UPDATE: types based on ModifierType ()
 
 FORWARD_TYPE = Tuple[torch.Tensor,  # mask

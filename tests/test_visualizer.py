@@ -1,9 +1,6 @@
 import unittest
 from torch import nn
-
-from nn_executor.static.analyzer import StaticAnalyzer
 from nn_executor import models as mm
-from nn_executor.visualizer import plan_a_graph
 from nn_executor.graph_analyzer import GraphDescription
 from nn_executor.visualizer import GraphVisualDescription, draw_graph
 import shared_tests_data
@@ -16,7 +13,7 @@ class TestVisualizer(unittest.TestCase):
                               mm.Parallel(mm.Cat(1),
                                           nn.Sequential(
                                                         nn.Conv2d(5, 5, 1),
-                                                        mm.ResBranch(5, 5, 1, 2),
+                                                        mm.ResBranch(5, 5, 1, 3),
                                                         mm.Parallel(mm.Cat(1),
                                                                     mm.ResBranch(5, 5, 1, 3),
                                                                     mm.ResBranch(5, 5, 1, 2)),

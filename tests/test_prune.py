@@ -1,9 +1,10 @@
 from typing import List, Tuple, Union
 import unittest
 import torch
-from nn_executor import modifiers, models, prune, parser, utils
+from nn_executor import modifiers, models, parser, utils
 from nn_executor.executor import Executor
 from nn_executor.model_description import ModelDescription
+from nn_executor.pruning import prune
 import shared_tests_data
 
 

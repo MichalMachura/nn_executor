@@ -7,7 +7,6 @@ DATA_TYPE = torch.Tensor
 
 
 def get_from_idx(x, idx: int):
-
     if type(x) in [tuple, list]:
         return x[idx]
 
@@ -18,7 +17,6 @@ def get_from_idx(x, idx: int):
 
 
 class Node:
-
     def __init__(self,
                  layer: nn.Module,
                  degree: Tuple[int, int] = (1, 1),
